@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 import base64
 # ==============================================================================
-# 1. تنظیمات امنیتی - سیستم ورود منعطف و ضد-خطا
+# 1. تنظیمات امنیتی
 # ==============================================================================
 USER_CREDENTIALS = {
     "alireza76ir@gmail.com": "siman123",
@@ -32,7 +32,7 @@ def check_password():
 if not check_password():
     st.stop()
 # ==============================================================================
-# 2. تنظیمات صفحه و استایل بصری
+# 2. تنظیمات صفحه و استایل
 # ==============================================================================
 st.set_page_config(page_title="داشبورد فنی ارتعاشات سیمان تهران", layout="wide")
 def get_image_base64(path):
@@ -82,7 +82,6 @@ def load_and_process_data():
         df = pd.read_csv(VIB_URL)
         df.columns = df.columns.str.strip()
         df = df.astype(str).apply(lambda x: x.str.strip())
-        # اصلاح نام ستون‌ها
         if "سیستم درایور" in df.columns:
             df = df.rename(columns={"سیستم درایور": "نوع اتصال"})
         balance_cols = [c for c in df.columns if c == "بالانس"]
@@ -92,7 +91,6 @@ def load_and_process_data():
             new_cols = cols.copy()
             new_cols[idx_r] = "شماره بیرینگ"
             df.columns = new_cols
-        # تبدیل ستون‌های عددی برای محاسبات
         numeric_cols = ["بالانس", "هزینه", "شماره بیرینگ"]
         for col in numeric_cols:
             if col in df.columns:
@@ -103,7 +101,6 @@ def load_and_process_data():
         return None
 df = load_and_process_data()
 if df is not None:
-    # 4. فیلتر پیشرفته
     with st.expander("🔍 سیستم جستجو و فیلتر پیشرفته", expanded=True):
         f_col1, f_col2, f_col3, f_col4 = st.columns([1, 1, 1, 1])
         with f_col1:
@@ -120,14 +117,12 @@ if df is not None:
             if date_col_name and not df.empty:
                 available_dates = sorted(df[date_col_name].unique(), reverse=True)
                 selected_date = st.selectbox("📅 تاریخ خاص:", ["همه تاریخ‌ها"] + list(available_dates))
-    # اعمال فیلترها
     filtered_df = df.copy()
     if selected_line != "همه": filtered_df = filtered_df[filtered_df["خط تولید"] == selected_line]
     if selected_unit != "همه": filtered_df = filtered_df[filtered_df["واحد"] == selected_unit]
     if search_eq: filtered_df = filtered_df[filtered_df["عنوان تجهیز"].str.contains(search_eq, case=False, na=False)]
     if selected_date != "همه تاریخ‌ها" and date_col_name:
         filtered_df = filtered_df[filtered_df[date_col_name] == selected_date]
-    # 5. متریک‌ها
     st.markdown("---")
     st.subheader("📈 وضعیت تحلیل فنی")
     m1, m2, m3 = st.columns(3)
@@ -138,7 +133,6 @@ if df is not None:
     with m3:
         total_cost = filtered_df["هزینه"].sum() if "هزینه" in filtered_df.columns else 0
         st.metric("جمع کل هزینه‌ها", f"{total_cost:,.0f} تومان")
-    # 6. نمایش جدول
     st.markdown("---")
     st.subheader("📋 جدول جزئیات پایش و مقایسه")
     vib_col = next((col for col in df.columns if "mm/s" in col), None)
@@ -150,7 +144,8 @@ if df is not None:
             return ''
         except: return ''
     if vib_col:
-        styled_df = filtered_df.style.applymap(color_vibration, subset=[vib_col])
+        # استفاده از map به جای applymap برای سازگاری با نسخه‌های جدید پانداز
+        styled_df = filtered_df.style.map(color_vibration, subset=[vib_col])
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
         st.info(f"💡 راهنمای رنگی ستون {vib_col}: سفیده (عادی) | زرد (هشدار ۴.۷-۷.۲) | قرمز (خطر بالای ۷.۲)")
     else:
