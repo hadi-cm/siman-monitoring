@@ -135,19 +135,34 @@ if df is not None:
         st.metric("جمع کل هزینه‌ها", f"{total_cost:,.0f} تومان")
     st.markdown("---")
     st.subheader("📋 جدول جزئیات پایش و مقایسه")
-    vib_col = next((col for col in df.columns if "mm/s" in col), None)
+       st.markdown("---")
+    st.subheader("📋 جدول جزئیات پایش و مقایسه")
+
+    # ستون‌های اندازه‌گیری ارتعاش طبق نام‌های موجود در جدول شما
+    vib_cols = [
+        col for col in filtered_df.columns
+        if any(name in str(col).strip().lower() for name in ["افقی", "عمودی", "محوری"])
+    ]
     def color_vibration(val):
         try:
-            num = float(val)
-            if num > 7.2: return 'background-color: #ffcccc; color: red; font-weight: bold'
-            if num > 4.7: return 'background-color: #ffffcc; color: #856404'
-            return ''
-        except: return ''
-    if vib_col:
-        # استفاده از map به جای applymap برای سازگاری با نسخه‌های جدید پانداز
-        styled_df = filtered_df.style.map(color_vibration, subset=[vib_col])
+            # اعداد اعشاری با ممیز فارسی یا جداکننده‌های متداول را هم مدیریت می‌کند
+            number_text = str(val).strip().replace(",", ".").replace("٫", ".")
+            num = float(number_text)
+            if num > 7.2:
+                return "background-color: #ffcccc; color: #9b0000; font-weight: bold"
+            elif num > 4.7:
+                return "background-color: #fff2b2; color: #795500; font-weight: bold"
+            else:
+                return "background-color: #d9f2d9; color: #145214"
+        except (TypeError, ValueError):
+            return ""
+    if vib_cols:
+        styled_df = filtered_df.style.map(color_vibration, subset=vib_cols)
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
-        st.info(f"💡 راهنمای رنگی ستون {vib_col}: سفیده (عادی) | زرد (هشدار ۴.۷-۷.۲) | قرمز (خطر بالای ۷.۲)")
+        st.info("راهنمای رنگ: سبز تا ۴٫۷ | زرد بیشتر از ۴٫۷ تا ۷٫۲ | قرمز بیشتر از ۷٫۲")
+    else:
+        st.warning("ستون‌های ارتعاش با نام‌های افقی، عمودی یا محوری پیدا نشدند.")
+        st.dataframe(filtered_df, use_container_width=True, hide_index=True)
     else:
         st.dataframe(filtered_df, use_container_width=True, hide_index=True)
     st.markdown('<div class="footer">طراحی و توسعه: مهندس هادی زندیه | شرکت فاز فیدار پارسیان</div>', unsafe_allow_html=True)
