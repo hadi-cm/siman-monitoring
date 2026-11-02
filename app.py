@@ -150,7 +150,7 @@ if df is not None:
             return ''
         except: return ''
     if vib_col:
-        styled_df = filtered_df.style.applymap(color_vibration, subset=[vib_col])
+       styled_df = filtered_df.style.map(color_vibration, subset=[vib_col])
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
         st.info(f"💡 راهنمای رنگی ستون {vib_col}: سفیده (عادی) | زرد (هشدار ۴.۷-۷.۲) | قرمز (خطر بالای ۷.۲)")
     else:
