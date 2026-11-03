@@ -1,7 +1,6 @@
 import pandas as pd
 import streamlit as st
 import base64
-
 # ==============================================================================
 # 1. تنظیمات امنیتی و دسترسی
 # ==============================================================================
@@ -12,7 +11,6 @@ USER_CREDENTIALS = {
     "tehrancement@gmail.com": "siman123",
     "masoud.sa.1989823@gmail.com": "siman123",
 }
-
 def check_password():
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
@@ -31,24 +29,19 @@ def check_password():
                     st.error("❌ ایمیل یا رمز عبور اشتباه است.")
         return False
     return True
-
 if not check_password():
     st.stop()
-
 # ==============================================================================
 # 2. پیکربندی صفحه و استایل‌های CSS
 # ==============================================================================
 st.set_page_config(page_title="داشبورد فنی ارتعاشات سیمان تهران", layout="wide")
-
 def get_image_base64(path):
     try:
         with open(path, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode()
     except: return ""
-
 logo_siman_base64 = get_image_base64("client_logo.png")
 logo_faz_fidar_base64 = get_image_base64("my_logo.png")
-
 st.markdown(f"""
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background-color: white; padding: 15px 30px; border-radius: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
         <img src="data:image/png;base64,{logo_faz_fidar_base64}" style="width: 110px; height: auto;">
@@ -56,37 +49,60 @@ st.markdown(f"""
         <img src="data:image/png;base64,{logo_siman_base64}" style="width: 110px; height: auto;">
     </div>
     """, unsafe_allow_html=True)
-
 # ==============================================================================
 # 3. مدیریت داده‌ها و اتصال به گوگل‌شیت
 # ==============================================================================
+# لینک شیت ارتعاشات (تب اصلی)
 VIB_URL = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=0"
-
+# برای تب Assets، باید gid مربوط به آن تب را جایگزین کنید. فعلاً برنامه سعی میکند از طریق نام یا لینک شما متصل شود.
+# اگر تب Assets را ساختید، لینک خروجی CSV آن تب را اینجا قرار دهید.
+ASSETS_URL = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv" 
 @st.cache_data(ttl=60)
-def load_and_process_data():
+def load_data():
     try:
-        df = pd.read_csv(VIB_URL)
-        df.columns = df.columns.str.strip()
-        df = df.astype(str).apply(lambda x: x.str.strip())
-        if "سیستم درایور" in df.columns:
-            df = df.rename(columns={"سیستم درایور": "نوع اتصال"})
-        numeric_cols = ["بالانس", "هزینه"]
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col].str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
-        return df
+        # بارگذاری داده‌های ارتعاشات
+        df_vib = pd.read_csv(VIB_URL)
+        df_vib.columns = df_vib.columns.str.strip()
+        df_vib = df_vib.astype(str).apply(lambda x: x.str.strip())
+        # بارگذاری داده‌های Assets (مشخصات فنی)
+        try:
+            df_assets = pd.read_csv(ASSETS_URL)
+            df_assets.columns = df_assets.columns.str.strip()
+            df_assets = df_assets.astype(str).apply(lambda x: x.str.strip())
+        except:
+            df_assets = None
+        return df_vib, df_assets
     except Exception as e:
         st.error(f"❌ خطا در دریافت داده‌ها: {e}")
-        return None
-
-df = load_and_process_data()
-
+        return None, None
+df, df_assets = load_data()
+# ==============================================================================
+# 4. منطق هوشمند راهنمای نقاط (Point Map)
+# ==============================================================================
+def get_point_guide(equipment_name, equipment_type):
+    equipment_name = equipment_name.lower()
+    equipment_type = equipment_type.lower() if equipment_type else ""
+    # منطق فن‌ها
+    if "فن" in equipment_name or "فن" in equipment_type:
+        if "ایر اسلاید" in equipment_name:
+            return "P1: انتهای موتور | P2: سر موتور"
+        return "P1: انتهای موتور | P2: سر موتور | P3: یاتاقان فیکس | P4: یاتاقان آزاد"
+    # منطق کمپرسور، پمپ، موتور، بلوئر
+    if any(x in equipment_name or x in equipment_type for x in ["کمپرسور", "پمپ", "موتور", "بلوئر"]):
+        return "P1: انتهای موتور | P2: سر موتور | P3: محور ورودی/سر تجهیز | P4: انتهای تجهیز/سمت آزاد"
+    # منطق کراشر
+    if "کراشر" in equipment_name or "کراشر" in equipment_type:
+        return "P1: انتهای موتور | P2: سر موتور | P3: یاتاقان فیکس (صغیر) | P4: یاتاقان آزاد (صغیر) | P5: یاتاقان فیکس (کبیر) | P6: یاتاقان آزاد (کبیر)"
+    # منطق گیربکس
+    if "گیربکس" in equipment_name or "گیربکس" in equipment_type:
+        return "P1: انتهای موتور | P2: سر موتور | P3: محور ورودی | P4: محور خروجی | ... تا P12 (مطابق نقشه فنی)"
+    return "راهنمای نقاط برای این تجهیز تعریف نشده است."
+# ==============================================================================
+# 5. رابط کاربری و فیلترها
+# ==============================================================================
 if df is not None:
-    # --- بخش فیلترها ---
     with st.expander("🔍 سیستم جستجو و فیلتر پیشرفته", expanded=True):
-        # استفاده از 5 ستون برای نمایش بهتر
         f_col1, f_col2, f_col3, f_col4, f_col5 = st.columns([1, 1, 1, 1, 1])
-        
         with f_col1:
             all_lines = sorted([str(x) for x in df["خط تولید"].unique() if str(x) not in ['nan', 'None', '']]) if "خط تولید" in df.columns else []
             selected_line = st.selectbox("📍 خط تولید:", ["همه"] + all_lines)
@@ -96,64 +112,80 @@ if df is not None:
         with f_col3:
             search_eq = st.text_input("🔍 نام تجهیز:", "")
         with f_col4:
-            point_list = ["همه"] + [f"P{i}" for i in range(1, 12)]
+            point_list = ["همه"] + [f"P{i}" for i in range(1, 13)]
             selected_point = st.selectbox("📍 نقطه:", point_list)
         with f_col5:
             date_col_name = next((col for col in df.columns if "تاریخ" in col), None)
             selected_date = "همه تاریخ‌ها"
-            if date_col_name and not df.empty:
+            if date_col_name:
                 available_dates = sorted(df[date_col_name].unique(), reverse=True)
                 selected_date = st.selectbox("📅 تاریخ:", ["همه تاریخ‌ها"] + list(available_dates))
-
     # اعمال فیلترها
     filtered_df = df.copy()
     if selected_line != "همه": filtered_df = filtered_df[filtered_df["خط تولید"] == selected_line]
     if selected_unit != "همه": filtered_df = filtered_df[filtered_df["واحد"] == selected_unit]
     if search_eq: filtered_df = filtered_df[filtered_df["عنوان تجهیز"].str.contains(search_eq, case=False, na=False)]
-    
-    # --- هوشمندسازی شناسایی ستون نقاط ---
-    point_col_name = None
-    for col in df.columns:
-        if df[col].astype(str).str.contains('P\d+', na=False).any():
-            point_col_name = col
-            break
-    
+    # فیلتر نقطه (هوشمند)
+    point_col_name = next((col for col in df.columns if df[col].astype(str).str.contains('P\d+', na=False).any()), None)
     if point_col_name and selected_point != "همه":
         filtered_df = filtered_df[filtered_df[point_col_name] == selected_point]
-
     if selected_date != "همه تاریخ‌ها" and date_col_name:
         filtered_df = filtered_df[filtered_df[date_col_name] == selected_date]
-
-    # نمایش تحلیل فنی
-    st.markdown("### 📈 وضعیت تحلیل فنی")
-    m1, m2, m3 = st.columns(3)
-    with m1: st.metric("تعداد رکورد یافت شده", len(filtered_df))
-    with m2:
-        bal_count = filtered_df[filtered_df["بالانس"] != 0].shape[0] if "بالانس" in filtered_df.columns else 0
-        st.metric("تعداد بالانس شده", bal_count)
-    with m3:
-        total_cost = filtered_df["هزینه"].sum() if "هزینه" in filtered_df.columns else 0
-        st.metric("جمع کل هزینه‌ها", f"{total_cost:,.0f} تومان")
-
-    # نمایش جدول
-    st.markdown("### 📋 جدول جزئیات پایش و مقایسه")
-    vib_cols = [col for col in filtered_df.columns if any(name in str(col) for name in ["افقی", "عمودی", "محوری", "mm/s"])]
-
-    def color_vibration(val):
-        try:
-            num = float(str(val).replace(",", ".").replace("٫", "."))
-            if num > 7.2: return 'background-color: #ffcccc; color: #9b0000; font-weight: bold'
-            if num > 4.7: return 'background-color: #fff2b2; color: #856404; font-weight: bold'
-            return 'background-color: #e6ffed; color: #2e7d32'
-        except: return ''
-
-    if vib_cols:
-        styled_df = filtered_df.style.map(color_vibration, subset=vib_cols)
-        st.dataframe(styled_df, use_container_width=True, hide_index=True)
-        st.info("💡 راهنمای رنگی: سبز (عادی) | زرد (هشدار ۴.۷-۷.۲) | قرمز (خطر بالای ۷.۲)")
+    # ==============================================================================
+    # 6. بخش نمایش اطلاعات فنی (The Asset Intelligence)
+    # ==============================================================================
+    if not filtered_df.empty:
+        # برداشتن اولین تجهیز یافت شده برای نمایش مشخصات فنی
+        sample_eq_name = filtered_df["عنوان تجهیز"].iloc[0]
+        if df_assets is not None:
+            # جستجو در شیت Assets
+            asset_info = df_assets[df_assets["نام تجهیز"] == sample_eq_name]
+            if not asset_info.empty:
+                row = asset_info.iloc[0]
+                eq_type = row.get("نوع تجهیز", "نامشخص")
+                # نمایش کارت اطلاعات فنی
+                st.markdown(f"""
+                <div style="background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-left: 10px solid #1E3A8D; margin-bottom: 20px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05);">
+                    <h3 style="color: #1E3A8D; margin-top: 0;">🛠️ مشخصات فنی تجهیز: {sample_eq_name}</h3>
+                    <p style="font-size: 16px; color: #333;">
+                        <b>نوع تجهیز:</b> {eq_type} | <b>دور نامی:</b> {row.get('دور نامی', 'نامشخص')} RPM | <b>واحد:</b> {row.get('واحد', 'نامشخص')}
+                    </p>
+                    <div style="background-color: white; padding: 10px; border-radius: 10px; border: 1px solid #ddd;">
+                        <b>📌 راهنمای نقاط:</b> {get_point_guide(sample_eq_name, eq_type)}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.warning(f"⚠️ مشخصات فنی برای تجهیز {sample_eq_name} در شیت Assets یافت نشد.")
+        # نمایش تحلیل فنی سریع
+        m1, m2, m3 = st.columns(3)
+        with m1: st.metric("تعداد رکورد یافت شده", len(filtered_df))
+        with m2:
+            bal_count = filtered_df[filtered_df["بالانس"] != '0'].shape[0] if "بالانس" in filtered_df.columns else 0
+            st.metric("تعداد بالانس شده", bal_count)
+        with m3:
+            try:
+                total_cost = pd.to_numeric(filtered_df["هزینه"].str.replace(r'[^\d.]', '', regex=True), errors='coerce').sum()
+                st.metric("جمع کل هزینه‌ها", f"{total_cost:,.0f} تومان")
+            except: st.metric("جمع کل هزینه‌ها", "نامشخص")
+        # نمایش جدول با رنگ‌بندی ارتعاشات
+        st.markdown("### 📋 جدول جزئیات پایش و مقایسه")
+        vib_cols = [col for col in filtered_df.columns if any(name in str(col) for name in ["افقی", "عمودی", "محوری", "mm/s"])]
+        def color_vibration(val):
+            try:
+                num = float(str(val).replace(",", ".").replace("٫", "."))
+                if num > 7.2: return 'background-color: #ffcccc; color: #9b0000; font-weight: bold'
+                if num > 4.7: return 'background-color: #fff2b2; color: #856404; font-weight: bold'
+                return 'background-color: #e6ffed; color: #2e7d32'
+            except: return ''
+        if vib_cols:
+            styled_df = filtered_df.style.map(color_vibration, subset=vib_cols)
+            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+            st.info("💡 راهنمای رنگی: سبز (عادی) | زرد (هشدار ۴.۷-۷.۲) | قرمز (خطر بالای ۷.۲)")
+        else:
+            st.dataframe(filtered_df, use_container_width=True, hide_index=True)
     else:
-        st.dataframe(filtered_df, use_container_width=True, hide_index=True)
-
+        st.info("🔎 هیچ داده‌ای با این فیلترها یافت نشد.")
     st.markdown('<div style="text-align:center; margin-top:20px; font-weight:bold;">طراحی و توسعه: مهندس هادی زندیه | شرکت فاز فیدار پارسیان</div>', unsafe_allow_html=True)
 else:
-    st.error("❌ خطا در دریافت داده‌ها.")
+    st.error("❌ خطا در دریافت داده‌ها. لطفاً اتصال اینترنت و لینک گوگل‌شیت را بررسی کنید.")
