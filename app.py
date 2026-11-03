@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 import base64
 # ==============================================================================
-# 1. تنظیمات امنیتی
+# 1. تنظیمات امنیتی و دسترسی
 # ==============================================================================
 USER_CREDENTIALS = {
     "alireza76ir@gmail.com": "siman123",
@@ -32,7 +32,7 @@ def check_password():
 if not check_password():
     st.stop()
 # ==============================================================================
-# 2. تنظیمات صفحه و استایل
+# 2. پیکربندی صفحه و استایل‌های CSS
 # ==============================================================================
 st.set_page_config(page_title="داشبورد فنی ارتعاشات سیمان تهران", layout="wide")
 def get_image_base64(path):
@@ -73,7 +73,7 @@ st.markdown(f"""
     </div>
     """, unsafe_allow_html=True)
 # ==============================================================================
-# 3. اتصال به داده‌ها
+# 3. مدیریت داده‌ها و اتصال به گوگل‌شیت
 # ==============================================================================
 VIB_URL = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=0"
 @st.cache_data(ttl=60)
@@ -84,14 +84,7 @@ def load_and_process_data():
         df = df.astype(str).apply(lambda x: x.str.strip())
         if "سیستم درایور" in df.columns:
             df = df.rename(columns={"سیستم درایور": "نوع اتصال"})
-        balance_cols = [c for c in df.columns if c == "بالانس"]
-        if len(balance_cols) > 1:
-            cols = df.columns.tolist()
-            idx_r = cols.index(balance_cols[1])
-            new_cols = cols.copy()
-            new_cols[idx_r] = "شماره بیرینگ"
-            df.columns = new_cols
-        numeric_cols = ["بالانس", "هزینه", "شماره بیرینگ"]
+        numeric_cols = ["بالانس", "هزینه"]
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col].str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
@@ -101,6 +94,7 @@ def load_and_process_data():
         return None
 df = load_and_process_data()
 if df is not None:
+    # بخش فیلترها
     with st.expander("🔍 سیستم جستجو و فیلتر پیشرفته", expanded=True):
         f_col1, f_col2, f_col3, f_col4 = st.columns([1, 1, 1, 1])
         with f_col1:
@@ -117,52 +111,44 @@ if df is not None:
             if date_col_name and not df.empty:
                 available_dates = sorted(df[date_col_name].unique(), reverse=True)
                 selected_date = st.selectbox("📅 تاریخ خاص:", ["همه تاریخ‌ها"] + list(available_dates))
+    # اعمال فیلترها بر روی دیتافریم
     filtered_df = df.copy()
     if selected_line != "همه": filtered_df = filtered_df[filtered_df["خط تولید"] == selected_line]
     if selected_unit != "همه": filtered_df = filtered_df[filtered_df["واحد"] == selected_unit]
     if search_eq: filtered_df = filtered_df[filtered_df["عنوان تجهیز"].str.contains(search_eq, case=False, na=False)]
     if selected_date != "همه تاریخ‌ها" and date_col_name:
         filtered_df = filtered_df[filtered_df[date_col_name] == selected_date]
-    st.markdown("---")
-    st.subheader("📈 وضعیت تحلیل فنی")
+    # نمایش بخش تحلیل فنی با استایل جدید (بدون خط جداکننده ارورزا)
+    st.markdown("### 📈 وضعیت تحلیل فنی")
     m1, m2, m3 = st.columns(3)
-    with m1: st.metric("تعداد رکورد یافت شده", len(filtered_df))
+    with m1: 
+        st.metric("تعداد رکورد یافت شده", len(filtered_df))
     with m2:
         bal_count = filtered_df[filtered_df["بالانس"] != 0].shape[0] if "بالانس" in filtered_df.columns else 0
         st.metric("تعداد بالانس شده", bal_count)
     with m3:
         total_cost = filtered_df["هزینه"].sum() if "هزینه" in filtered_df.columns else 0
         st.metric("جمع کل هزینه‌ها", f"{total_cost:,.0f} تومان")
-    st.markdown("---")
-    st.subheader("📋 جدول جزئیات پایش و مقایسه")
-       st.markdown("---")
-    st.subheader("📋 جدول جزئیات پایش و مقایسه")
-
-    # ستون‌های اندازه‌گیری ارتعاش طبق نام‌های موجود در جدول شما
-    vib_cols = [
-        col for col in filtered_df.columns
-        if any(name in str(col).strip().lower() for name in ["افقی", "عمودی", "محوری"])
-    ]
+    # نمایش جدول جزئیات
+    st.markdown("### 📋 جدول جزئیات پایش و مقایسه")
+    # شناسایی ستون‌های ارتعاش برای رنگ‌بندی (افقی، عمودی، محوری)
+    vib_cols = [col for col in filtered_df.columns if any(name in str(col) for name in ["افقی", "عمودی", "محوری", "mm/s"])]
     def color_vibration(val):
         try:
-            # اعداد اعشاری با ممیز فارسی یا جداکننده‌های متداول را هم مدیریت می‌کند
-            number_text = str(val).strip().replace(",", ".").replace("٫", ".")
-            num = float(number_text)
-            if num > 7.2:
-                return "background-color: #ffcccc; color: #9b0000; font-weight: bold"
-            elif num > 4.7:
-                return "background-color: #fff2b2; color: #795500; font-weight: bold"
-            else:
-                return "background-color: #d9f2d9; color: #145214"
-        except (TypeError, ValueError):
-            return ""
+            # مدیریت اعداد اعشاری با فرمت‌های مختلف
+            num_str = str(val).replace(",", ".").replace("٫", ".")
+            num = float(num_str)
+            if num > 7.2: 
+                return 'background-color: #ffcccc; color: #9b0000; font-weight: bold'
+            if num > 4.7: 
+                return 'background-color: #fff2b2; color: #856404; font-weight: bold'
+            return 'background-color: #e6ffed; color: #2e7d32'
+        except: 
+            return ''
     if vib_cols:
         styled_df = filtered_df.style.map(color_vibration, subset=vib_cols)
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
-        st.info("راهنمای رنگ: سبز تا ۴٫۷ | زرد بیشتر از ۴٫۷ تا ۷٫۲ | قرمز بیشتر از ۷٫۲")
-    else:
-        st.warning("ستون‌های ارتعاش با نام‌های افقی، عمودی یا محوری پیدا نشدند.")
-        st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+        st.info("💡 راهنمای رنگی: سبز (عادی) | زرد (هشدار ۴.۷-۷.۲) | قرمز (خطر بالای ۷.۲)")
     else:
         st.dataframe(filtered_df, use_container_width=True, hide_index=True)
     st.markdown('<div class="footer">طراحی و توسعه: مهندس هادی زندیه | شرکت فاز فیدار پارسیان</div>', unsafe_allow_html=True)
