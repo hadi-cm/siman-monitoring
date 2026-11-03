@@ -5,11 +5,11 @@ import base64
 # 1. تنظیمات امنیتی و دسترسی
 # ==============================================================================
 USER_CREDENTIALS = {
-    "alireza76ir@gmail.com": "cement123",
-    "vah.rezaei@gmail.com": "cement123",
-    "cm.zandiyeh@gmail.com": "cement123",
-    "tehrancement@gmail.com": "sement123",
-    "masoud.sa.1989823@gmail.com": "cement123",
+    "alireza76ir@gmail.com": "siman123",
+    "vah.rezaei@gmail.com": "siman123",
+    "cm.zandiyeh@gmail.com": "siman123",
+    "tehrancement@gmail.com": "siman123",
+    "masoud.sa.1989823@gmail.com": "siman123",
 }
 def check_password():
     if "authenticated" not in st.session_state:
