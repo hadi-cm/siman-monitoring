@@ -1,3 +1,4 @@
+```python
 import pandas as pd
 import streamlit as st
 import base64
@@ -5,11 +6,11 @@ import base64
 # 1. تنظیمات امنیتی و دسترسی
 # ==============================================================================
 USER_CREDENTIALS = {
-    "alireza76ir@gmail.com": "siman123",
-    "vah.rezaei@gmail.com": "siman123",
-    "cm.zandiyeh@gmail.com": "siman123",
-    "tehrancement@gmail.com": "siman123",
-    "masoud.sa.1989823@gmail.com": "siman123",
+    "alireza76ir@gmail.com": "cement123",
+    "vah.rezaei@gmail.com": "cement123",
+    "cm.zandiyeh@gmail.com": "cement123",
+    "tehrancement@gmail.com": "sement123",
+    "masoud.sa.1989823@gmail.com": "cement123",
 }
 def check_password():
     if "authenticated" not in st.session_state:
@@ -94,9 +95,9 @@ def load_and_process_data():
         return None
 df = load_and_process_data()
 if df is not None:
-    # بخش فیلترها
+    # --- سیستم فیلتر پیشرفته ---
     with st.expander("🔍 سیستم جستجو و فیلتر پیشرفته", expanded=True):
-        f_col1, f_col2, f_col3, f_col4 = st.columns([1, 1, 1, 1])
+        f_col1, f_col2, f_col3, f_col4, f_col5 = st.columns([1, 1, 1, 1, 1])
         with f_col1:
             all_lines = sorted([str(x) for x in df["خط تولید"].unique() if str(x) not in ['nan', 'None', '']]) if "خط تولید" in df.columns else []
             selected_line = st.selectbox("📍 خط تولید:", ["همه"] + all_lines)
@@ -105,46 +106,49 @@ if df is not None:
             selected_unit = st.selectbox("🏢 واحد:", ["همه"] + all_units)
         with f_col3:
             search_eq = st.text_input("🔍 نام تجهیز:", "")
-        date_col_name = next((col for col in df.columns if "تاریخ" in col), None)
-        selected_date = "همه تاریخ‌ها"
         with f_col4:
-            if date_col_name and not df.empty:
-                available_dates = sorted(df[date_col_name].unique(), reverse=True)
-                selected_date = st.selectbox("📅 تاریخ خاص:", ["همه تاریخ‌ها"] + list(available_dates))
-    # اعمال فیلترها بر روی دیتافریم
-    filtered_df = df.copy()
-    if selected_line != "همه": filtered_df = filtered_df[filtered_df["خط تولید"] == selected_line]
-    if selected_unit != "همه": filtered_df = filtered_df[filtered_df["واحد"] == selected_unit]
-    if search_eq: filtered_df = filtered_df[filtered_df["عنوان تجهیز"].str.contains(search_eq, case=False, na=False)]
+            point_options = ["همه"] + [f"P{i}" for i in range(1, 12)]
+            selected_point = st.selectbox("📍 نقطه اندازه‌گیری:", point_options)
+    # پیش‌فیلتر برای متصل کردن تاریخ به تجهیزات انتخاب شده
+    temp_df = df.copy()
+    if selected_line != "همه": temp_df = temp_df[temp_df["خط تولید"] == selected_line]
+    if selected_unit != "همه": temp_df = temp_df[temp_df["واحد"] == selected_unit]
+    if search_eq: temp_df = temp_df[temp_df["عنوان تجهیز"].str.contains(search_eq, case=False, na=False)]
+    # حالا تاریخ‌ها را فقط از روی داده‌های فیلتر شده استخراج می‌کنیم
+    date_col_name = next((col for col in df.columns if "تاریخ" in col), None)
+    with f_col5:
+        if date_col_name and not temp_df.empty:
+            available_dates = sorted(temp_df[date_col_name].unique(), reverse=True)
+            selected_date = st.selectbox("📅 تاریخ خاص:", ["همه تاریخ‌ها"] + list(available_dates))
+        else:
+            selected_date = "همه تاریخ‌ها"
+    # اعمال نهایی فیلترها
+    filtered_df = temp_df.copy()
+    point_col = next((col for col in df.columns if "نقطه" in col or "Point" in col), None)
+    if point_col and selected_point != "همه":
+        filtered_df = filtered_df[filtered_df[point_col] == selected_point]
     if selected_date != "همه تاریخ‌ها" and date_col_name:
         filtered_df = filtered_df[filtered_df[date_col_name] == selected_date]
-    # نمایش بخش تحلیل فنی با استایل جدید (بدون خط جداکننده ارورزا)
+    # نمایش تحلیل فنی
     st.markdown("### 📈 وضعیت تحلیل فنی")
     m1, m2, m3 = st.columns(3)
-    with m1: 
-        st.metric("تعداد رکورد یافت شده", len(filtered_df))
+    with m1: st.metric("تعداد رکورد یافت شده", len(filtered_df))
     with m2:
         bal_count = filtered_df[filtered_df["بالانس"] != 0].shape[0] if "بالانس" in filtered_df.columns else 0
         st.metric("تعداد بالانس شده", bal_count)
     with m3:
         total_cost = filtered_df["هزینه"].sum() if "هزینه" in filtered_df.columns else 0
         st.metric("جمع کل هزینه‌ها", f"{total_cost:,.0f} تومان")
-    # نمایش جدول جزئیات
+    # نمایش جدول
     st.markdown("### 📋 جدول جزئیات پایش و مقایسه")
-    # شناسایی ستون‌های ارتعاش برای رنگ‌بندی (افقی، عمودی، محوری)
     vib_cols = [col for col in filtered_df.columns if any(name in str(col) for name in ["افقی", "عمودی", "محوری", "mm/s"])]
     def color_vibration(val):
         try:
-            # مدیریت اعداد اعشاری با فرمت‌های مختلف
-            num_str = str(val).replace(",", ".").replace("٫", ".")
-            num = float(num_str)
-            if num > 7.2: 
-                return 'background-color: #ffcccc; color: #9b0000; font-weight: bold'
-            if num > 4.7: 
-                return 'background-color: #fff2b2; color: #856404; font-weight: bold'
+            num = float(str(val).replace(",", ".").replace("٫", "."))
+            if num > 7.2: return 'background-color: #ffcccc; color: #9b0000; font-weight: bold'
+            if num > 4.7: return 'background-color: #fff2b2; color: #856404; font-weight: bold'
             return 'background-color: #e6ffed; color: #2e7d32'
-        except: 
-            return ''
+        except: return ''
     if vib_cols:
         styled_df = filtered_df.style.map(color_vibration, subset=vib_cols)
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
