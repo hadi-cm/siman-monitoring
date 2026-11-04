@@ -1,7 +1,6 @@
 import pandas as pd
 import streamlit as st
 import base64
-
 # ==============================================================================
 # 1. تنظیمات امنیتی و دسترسی
 # ==============================================================================
@@ -12,7 +11,6 @@ USER_CREDENTIALS = {
     "tehrancement@gmail.com": "siman123",
     "masoud.sa.1989823@gmail.com": "siman123",
 }
-
 def check_password():
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
@@ -31,24 +29,19 @@ def check_password():
                     st.error("❌ ایمیل یا رمز عبور اشتباه است.")
         return False
     return True
-
 if not check_password():
     st.stop()
-
 # ==============================================================================
 # 2. پیکربندی صفحه و استایل‌ها
 # ==============================================================================
 st.set_page_config(page_title="داشبورد فنی ارتعاشات سیمان تهران", layout="wide")
-
 def get_image_base64(path):
     try:
         with open(path, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode()
     except: return ""
-
 logo_siman_base64 = get_image_base64("client_logo.png")
 logo_faz_fidar_base64 = get_image_base64("my_logo.png")
-
 st.markdown(f"""
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background-color: white; padding: 15px 30px; border-radius: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
         <img src="data:image/png;base64,{logo_faz_fidar_base64}" style="width: 110px; height: auto;">
@@ -56,23 +49,19 @@ st.markdown(f"""
         <img src="data:image/png;base64,{logo_siman_base64}" style="width: 110px; height: auto;">
     </div >
     """, unsafe_allow_html=True)
-
 # ==============================================================================
 # 3. مدیریت داده‌ها
 # ==============================================================================
 VIB_URL = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=0"
 ASSETS_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTI4vONsowudctVbskGkkSyQNqkkGZ8AuiykO9UKeE-8FSBZemWkR4q5DSAhpXEqwQkgsCUQy44Vvqx/pub?gid=1276803564&single=true&output=csv"
-
 @st.cache_data(ttl=60)
 def load_all_data():
     try:
         df_vib = pd.read_csv(VIB_URL)
         df_vib.columns = df_vib.columns.str.strip()
-
         title_col = next((c for c in df_vib.columns if "عنوان تجهیز" in c or "نام تجهیز" in c), None)
         if title_col:
-            df_vib[title_col] = df_vib[title_col].replace(r'^\s$', pd.NA, regex=True).replace('nan', pd.NA).ffill()
-        # تبدیل کل داده‌ها به رشته برای پایداری
+            df_vib[title_col] = df_vib[title_col].replace(r'^\s*$', pd.NA, regex=True).ffill()
         df_vib = df_vib.astype(str).apply(lambda x: x.str.strip())
         try:
             df_assets = pd.read_csv(ASSETS_URL)
@@ -134,7 +123,7 @@ if df is not None:
     if col_line and selected_line != "همه": filtered_df = filtered_df[filtered_df[col_line] == selected_line]
     if col_unit and selected_unit != "همه": filtered_df = filtered_df[filtered_df[col_unit] == selected_unit]
     if col_title and search_eq: filtered_df = filtered_df[filtered_df[col_title].str.contains(search_eq, case=False, na=False)]
-    point_col = next((c for c in df.columns if df[c].astype(str).str.contains('P\d+', na=False).any()), None)
+    point_col = next((c for c in df.columns if df[c].astype(str).str.contains(r'P\d+', na=False).any()), None)
     if point_col and selected_point != "همه": filtered_df = filtered_df[filtered_df[point_col] == selected_point]
     if col_date and selected_date != "همه تاریخ‌ها": filtered_df = filtered_df[filtered_df[col_date] == selected_date]
     # ==============================================================================
@@ -150,18 +139,20 @@ if df is not None:
                 if not match.empty:
                     asset_row = match.iloc[0]
                 else:
-                    # جستجوی تقریبی برای حل مشکل تفاوت نام‌ها
                     parts = eq_name_val.split()
                     if len(parts) > 1:
                         fuzzy_match = df_assets[df_assets[asset_name_col].str.contains(parts[0], na=False)]
                         if not fuzzy_match.empty: asset_row = fuzzy_match.iloc[0]
         if asset_row is not None:
-            eq_type = next((asset_row[c] for c in df_assets.columns if "نوع" in c), "نامشخص")
-            bearing = next((asset_row[c] for c in df_assets.columns if "بیرینگ" in c), "ثبت نشده")
-            bush = next((asset_row[c] for c in df_assets.columns if "بوش" in c), "---")
-            rpm = next((asset_row[c] for c in df_assets.columns if "دور" in c), "نامشخص")
-            unit_val = next((asset_row[c] for c in df_assets.columns if "واحد" in c), "نامشخص")
-            if bush.lower() in ['nan', 'none', '']: bush = "---"
+            def get_val(keyword):
+                col = next((c for c in df_assets.columns if keyword in c), None)
+                return asset_row[col] if col else "نامشخص"
+            eq_type = get_val("نوع")
+            bearing = get_val("بیرینگ")
+            bush = get_val("بوش")
+            rpm = get_val("دور")
+            unit_val = get_val("واحد")
+            if str(bush).lower() in ['nan', 'none', '']: bush = "---"
             st.markdown(f"""
             <div style="background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-right: 10px solid #1E3A8D; margin-bottom: 15px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05);">
                 <h3 style="color: #1E3A8D; margin-top: 0; font-family: 'Tahoma';">🛠️ مشخصات فنی تجهیز: {eq_name_val}</h3>
@@ -185,12 +176,16 @@ if df is not None:
         with m1: st.metric("تعداد رکورد یافت شده", len(filtered_df))
         with m2:
             bal_col = next((c for c in filtered_df.columns if "بالانس" in c), None)
-            bal_count = filtered_df[filtered_df[bal_col] != '0'].shape[0] if bal_col else 0
+            bal_count = 0
+            if bal_col:
+                bal_count = len(filtered_df[filtered_df[bal_col].astype(str).str.strip() != '0'])
             st.metric("تعداد بالانس شده", bal_count)
         with m3:
             cost_col = next((c for c in filtered_df.columns if "هزینه" in c), None)
             try:
-                total_cost = pd.to_numeric(filtered_df[cost_col].str.replace(r'[^\d.]', '', regex=True), errors='coerce').sum() if cost_col else 0
+                total_cost = 0
+                if cost_col:
+                    total_cost = pd.to_numeric(filtered_df[cost_col].str.replace(r'[^\d.]', '', regex=True), errors='coerce').sum()
                 st.metric("جمع کل هزینه‌ها", f"{total_cost:,.0f} تومان")
             except: st.metric("جمع کل هزینه‌ها", "نامشخص")
         st.markdown("### 📋 جدول جزئیات پایش و مقایسه")
