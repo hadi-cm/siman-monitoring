@@ -50,7 +50,7 @@ st.markdown(f"""
     </div >
     """, unsafe_allow_html=True)
 # ==============================================================================
-# 3. مدیریت داده‌ها (اتصال به گوگل‌شیت)
+# 3. مدیریت داده‌ها
 # ==============================================================================
 VIB_URL = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=0"
 ASSETS_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTI4vONsowudctVbskGkkSyQNqkkGZ8AuiykO9UKeE-8FSBZemWkR4q5DSAhpXEqwQkgsCUQy44Vvqx/pub?gid=1276803564&single=true&output=csv"
@@ -88,45 +88,34 @@ def get_point_guide(eq_name, eq_type):
         return "P1: انتهای موتور | P2: سر موتور | P3: محور ورودی | P4: محور خروجی"
     return "راهنمای نقاط تعریف نشده است."
 # ==============================================================================
-# 5. رابط کاربری و فیلترها (نسخه ضد خطا - Robust)
+# 5. رابط کاربری و فیلترها
 # ==============================================================================
 if df is not None:
     with st.expander("🔍 سیستم جستجو و فیلتر پیشرفته", expanded=True):
         f_col1, f_col2, f_col3, f_col4, f_col5 = st.columns([1, 1, 1, 1, 1])
-        # فیلتر خط تولید
         col_line = next((c for c in df.columns if "خط تولید" in c), None)
         with f_col1:
             if col_line:
                 all_lines = sorted({str(v).strip() for v in df[col_line].dropna().tolist() if str(v).strip() and str(v).strip().lower() != "nan"})
-                selected_line = st.selectbox("📍 خط تولید:", ["همه"] + all_lines)
-            else:
-                selected_line = "همه"
-                st.info("ستون خط تولید یافت نشد")
-        # فیلتر واحد
+                selected_line = st.selectbox("📍 خط تولید:", ["همه"] + list(all_lines))
+            else: selected_line = "همه"
         col_unit = next((c for c in df.columns if "واحد" in c), None)
         with f_col2:
             if col_unit:
                 all_units = sorted({str(v).strip() for v in df[col_unit].dropna().tolist() if str(v).strip() and str(v).strip().lower() != "nan"})
-                selected_unit = st.selectbox("🏢 واحد:", ["همه"] + all_units)
-            else:
-                selected_unit = "همه"
-                st.info("ستون واحد یافت نشد")
-        # جستجوی نام تجهیز
+                selected_unit = st.selectbox("🏢 واحد:", ["همه"] + list(all_units))
+            else: selected_unit = "همه"
         col_title = next((c for c in df.columns if "عنوان تجهیز" in c or "نام تجهیز" in c), None)
         with f_col3:
             search_eq = st.text_input("🔍 نام تجهیز:", "")
         with f_col4:
             selected_point = st.selectbox("📍 نقطه:", ["همه"] + [f"P{i}" for i in range(1, 13)])
-        # فیلتر تاریخ
         col_date = next((c for c in df.columns if "تاریخ" in c), None)
         with f_col5:
             if col_date:
                 all_dates = sorted({str(v).strip() for v in df[col_date].dropna().tolist() if str(v).strip() and str(v).strip().lower() != "nan"}, reverse=True)
-                selected_date = st.selectbox("📅 تاریخ:", ["همه تاریخ‌ها"] + all_dates)
-            else:
-                selected_date = "همه تاریخ‌ها"
-                st.info("ستون تاریخ یافت نشد")
-    # اعمال فیلترها
+                selected_date = st.selectbox("📅 تاریخ:", ["همه تاریخ‌ها"] + list(all_dates))
+            else: selected_date = "همه تاریخ‌ها"
     filtered_df = df.copy()
     if col_line and selected_line != "همه": filtered_df = filtered_df[filtered_df[col_line] == selected_line]
     if col_unit and selected_unit != "همه": filtered_df = filtered_df[filtered_df[col_unit] == selected_unit]
@@ -135,7 +124,7 @@ if df is not None:
     if point_col and selected_point != "همه": filtered_df = filtered_df[filtered_df[point_col] == selected_point]
     if col_date and selected_date != "همه تاریخ‌ها": filtered_df = filtered_df[filtered_df[col_date] == selected_date]
     # ==============================================================================
-    # 6. نمایش مشخصات فنی
+    # 6. نمایش مشخصات فنی (با قابلیت جستجوی هوشمند نام تجهیز)
     # ==============================================================================
     if not filtered_df.empty:
         eq_name_val = filtered_df[col_title].iloc[0] if col_title else "نامشخص"
@@ -143,14 +132,23 @@ if df is not None:
         if df_assets is not None:
             asset_name_col = next((c for c in df_assets.columns if "نام" in c or "تجهیز" in c), None)
             if asset_name_col:
-                match = df_assets[df_assets[asset_name_col] == eq_name_val]
-                if not match.empty: asset_row = match.iloc[0]
+                # جستجوی هوشمند: اگر نام دقیق پیدا نشد، دنبال شباهت بگرد
+                exact_match = df_assets[df_assets[asset_name_col] == eq_name_val]
+                if not exact_match.empty:
+                    asset_row = exact_match.iloc[0]
+                else:
+                    # جستجوی شباهت (اگر نام دستگاه بخشی از نام در شیت باشد)
+                    fuzzy_match = df_assets[df_assets[asset_name_col].str.contains(eq_name_val.split()[0], na=False)]
+                    if not fuzzy_match.empty:
+                        asset_row = fuzzy_match.iloc[0]
         if asset_row is not None:
+            # استخراج مقادیر با امنیت بالا
             eq_type = next((asset_row[c] for c in df_assets.columns if "نوع" in c), "نامشخص")
             bearing = next((asset_row[c] for c in df_assets.columns if "بیرینگ" in c), "ثبت نشده")
             bush = next((asset_row[c] for c in df_assets.columns if "بوش" in c), "---")
             rpm = next((asset_row[c] for c in df_assets.columns if "دور" in c), "نامشخص")
             unit_val = next((asset_row[c] for c in df_assets.columns if "واحد" in c), "نامشخص")
+            if bush in ['nan', 'None', '']: bush = "---"
             st.markdown(f"""
             <div style="background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-right: 10px solid #1E3A8D; margin-bottom: 15px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05);">
                 <h3 style="color: #1E3A8D; margin-top: 0; font-family: 'Tahoma';">🛠️ مشخصات فنی تجهیز: {eq_name_val}</h3>
@@ -158,19 +156,18 @@ if df is not None:
                     <span><b style="color: #1E3A8D;">🔹 نوع:</b> {eq_type}</span>
                     <span><b style="color: #1E3A8D;">🔹 دور:</b> {rpm} RPM</span>
                     <span><b style="color: #1E3A8D;">🔹 واحد:</b> {unit_val}</span>
-                </div >
+                </div>
                 <div style="margin-top: 12px; font-size: 15px; color: #1E3A8D; background: #e6efff; padding: 8px 15px; border-radius: 8px; display: inline-block;">
                     <b style="color: #1E3A8D;">📍 راهنمای نقاط (P-Map):</b> {get_point_guide(eq_name_val, eq_type)}
-                </div >
-            </div >
+                </div>
+            </div>
             """, unsafe_allow_html=True)
-
             with st.expander("📦 اطلاعات لجستیکی و قطعات (بیرینگ و بوش)", expanded=True):
                 c1, c2 = st.columns(2)
                 with c1: st.markdown(f"**🛢️ شماره بیرینگ:*\n`{bearing}`")
                 with c2: st.markdown(f"⚙️ شماره بوش:*\n`{bush}`")
         else:
-            st.warning(f"⚠️ مشخصات فنی برای تجهیز '{eq_name_val}' یافت نشد.")
+            st.warning(f"⚠️ مشخصات فنی برای تجهیز '{eq_name_val}' یافت نشد. (نام در شیت Assets چک شود)")
         # متریک‌ها و جدول
         m1, m2, m3 = st.columns(3)
         with m1: st.metric("تعداد رکورد یافت شده", len(filtered_df))
