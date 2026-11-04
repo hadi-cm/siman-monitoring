@@ -96,39 +96,63 @@ def get_point_guide(eq_name, eq_type):
         return "P1: انتهای موتور | P2: سر موتور | P3: محور ورودی | P4: محور خروجی"
     return "راهنمای نقاط برای این تجهیز تعریف نشده است."
 # ==============================================================================
-# 5. رابط کاربری و فیلترها
+# 5. رابط کاربری و فیلترها (نسخه ایمن شده برای جلوگیری از KeyError)
 # ==============================================================================
 if df is not None:
     with st.expander("🔍 سیستم جستجو و فیلتر پیشرفته", expanded=True):
         f_col1, f_col2, f_col3, f_col4, f_col5 = st.columns([1, 1, 1, 1, 1])
+        # فیلتر خط تولید
         with f_col1:
-            all_lines = sorted([str(x) for x in df["خط تولید"].unique() if str(x) not in ['nan', 'None', '']]) if "خط تولید" in df.columns else []
-            selected_line = st.selectbox("📍 خط تولید:", ["همه"] + all_lines)
+            col_line = next((c for c in df.columns if "خط تولید" in c), None)
+            if col_line:
+                all_lines = sorted([str(x) for x in df[col_line].unique() if str(x) not in ['nan', 'None', '']])
+                selected_line = st.selectbox("📍 خط تولید:", ["همه"] + all_lines)
+            else:
+                st.info("ستون خط تولید یافت نشد")
+                selected_line = "همه"
+        # فیلتر واحد
         with f_col2:
-            all_units = sorted([str(x) for x in df["واحد"].unique() if str(x) not in ['nan', 'None', '']]) if "واحد" in df.columns else []
-            selected_unit = st.selectbox("🏢 واحد:", ["همه"] + all_units)
+            col_unit = next((c for c in df.columns if "واحد" in c), None)
+            if col_unit:
+                all_units = sorted([str(x) for x in df[col_unit].unique() if str(x) not in ['nan', 'None', '']])
+                selected_unit = st.selectbox("🏢 واحد:", ["همه"] + all_units)
+            else:
+                st.info("ستون واحد یافت نشد")
+                selected_unit = "همه"
+        # جستجوی نام تجهیز
         with f_col3:
+            col_title = next((c for c in df.columns if "عنوان تجهیز" in c), None)
             search_eq = st.text_input("🔍 نام تجهیز:", "")
+        # فیلتر نقطه
         with f_col4:
             point_list = ["همه"] + [f"P{i}" for i in range(1, 13)]
             selected_point = st.selectbox("📍 نقطه:", point_list)
+        # فیلتر تاریخ
         with f_col5:
             date_col_name = next((col for col in df.columns if "تاریخ" in col), None)
             selected_date = "همه تاریخ‌ها"
             if date_col_name:
                 available_dates = sorted(df[date_col_name].unique(), reverse=True)
                 selected_date = st.selectbox("📅 تاریخ:", ["همه تاریخ‌ها"] + list(available_dates))
+            else:
+                st.info("ستون تاریخ یافت نشد")
+                selected_date = "همه تاریخ‌ها"
+    # اعمال فیلترها با چک کردن وجود ستون‌ها
     filtered_df = df.copy()
-    if selected_line != "همه": filtered_df = filtered_df[filtered_df["خط تولید"] == selected_line]
-    if selected_unit != "همه": filtered_df = filtered_df[filtered_df["واحد"] == selected_unit]
-    if search_eq: filtered_df = filtered_df[filtered_df["عنوان تجهیز"].str.contains(search_eq, case=False, na=False)]
+    if selected_line != "همه" and col_line:
+        filtered_df = filtered_df[filtered_df[col_line] == selected_line]
+    if selected_unit != "همه" and col_unit:
+        filtered_df = filtered_df[filtered_df[col_unit] == selected_unit]
+    if search_eq and col_title:
+        filtered_df = filtered_df[filtered_df[col_title].astype(str).str.contains(search_eq, case=False, na=False)]
+    # فیلتر نقطه (P-Map)
     point_col_name = next((col for col in df.columns if df[col].astype(str).str.contains('P\d+', na=False).any()), None)
     if point_col_name and selected_point != "همه":
         filtered_df = filtered_df[filtered_df[point_col_name] == selected_point]
     if selected_date != "همه تاریخ‌ها" and date_col_name:
         filtered_df = filtered_df[filtered_df[date_col_name] == selected_date]
     # ==============================================================================
-    # 6. نمایش مشخصات فنی (باکس آبی + باکس قطعات)
+    # 6. نمایش مشخصات فنی
     # ==============================================================================
     if not filtered_df.empty:
         sample_eq_name = filtered_df["عنوان تجهیز"].iloc[0]
