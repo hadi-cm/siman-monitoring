@@ -58,7 +58,7 @@ st.markdown(f"""
     """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 3. مدیریت داده‌ها (با قابلیت پر کردن خودکار سلول‌های خالی)
+# 3. مدیریت داده‌ها
 # ==============================================================================
 VIB_URL = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=0"
 ASSETS_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTI4vONsowudctVbskGkkSyQNqkkGZ8AuiykO9UKeE-8FSBZemWkR4q5DSAhpXEqwQkgsCUQy44Vvqx/pub?gid=1276803564&single=true&output=csv"
@@ -69,15 +69,10 @@ def load_all_data():
         df_vib = pd.read_csv(VIB_URL)
         df_vib.columns = df_vib.columns.str.strip()
 
-        # پر کردن خودکار نام تجهیزات (Fill Down)
         title_col = next((c for c in df_vib.columns if "عنوان تجهیز" in c or "نام تجهیز" in c), None)
         if title_col:
-            df_vib[title_col] = (
-                df_vib[title_col]
-                .replace(r'^\s$', pd.NA, regex=True)
-                .replace('nan', pd.NA)
-                .ffill()
-            )
+            df_vib[title_col] = df_vib[title_col].replace(r'^\s$', pd.NA, regex=True).replace('nan', pd.NA).ffill()
+        # تبدیل کل داده‌ها به رشته برای پایداری
         df_vib = df_vib.astype(str).apply(lambda x: x.str.strip())
         try:
             df_assets = pd.read_csv(ASSETS_URL)
@@ -115,13 +110,13 @@ if df is not None:
         col_line = next((c for c in df.columns if "خط تولید" in c), None)
         with f_col1:
             if col_line:
-                all_lines = sorted({str(v).strip() for v in df[col_line].dropna().tolist() if str(v).strip() and str(v).strip().lower() != "nan"})
+                all_lines = sorted({str(v).strip() for v in df[col_line].unique() if str(v).strip() and str(v).strip().lower() != "nan"})
                 selected_line = st.selectbox("📍 خط تولید:", ["همه"] + list(all_lines))
             else: selected_line = "همه"
         col_unit = next((c for c in df.columns if "واحد" in c), None)
         with f_col2:
             if col_unit:
-                all_units = sorted({str(v).strip() for v in df[col_unit].dropna().tolist() if str(v).strip() and str(v).strip().lower() != "nan"})
+                all_units = sorted({str(v).strip() for v in df[col_unit].unique() if str(v).strip() and str(v).strip().lower() != "nan"})
                 selected_unit = st.selectbox("🏢 واحد:", ["همه"] + list(all_units))
             else: selected_unit = "همه"
         col_title = next((c for c in df.columns if "عنوان تجهیز" in c or "نام تجهیز" in c), None)
@@ -132,7 +127,7 @@ if df is not None:
         col_date = next((c for c in df.columns if "تاریخ" in c), None)
         with f_col5:
             if col_date:
-                all_dates = sorted({str(v).strip() for v in df[col_date].dropna().tolist() if str(v).strip() and str(v).strip().lower() != "nan"}, reverse=True)
+                all_dates = sorted({str(v).strip() for v in df[col_date].unique() if str(v).strip() and str(v).strip().lower() != "nan"}, reverse=True)
                 selected_date = st.selectbox("📅 تاریخ:", ["همه تاریخ‌ها"] + list(all_dates))
             else: selected_date = "همه تاریخ‌ها"
     filtered_df = df.copy()
@@ -155,7 +150,7 @@ if df is not None:
                 if not match.empty:
                     asset_row = match.iloc[0]
                 else:
-                    # جستجوی تقریبی در صورتی که نام دقیق پیدا نشد
+                    # جستجوی تقریبی برای حل مشکل تفاوت نام‌ها
                     parts = eq_name_val.split()
                     if len(parts) > 1:
                         fuzzy_match = df_assets[df_assets[asset_name_col].str.contains(parts[0], na=False)]
