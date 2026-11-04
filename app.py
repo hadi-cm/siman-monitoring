@@ -109,7 +109,7 @@ if df is not None:
             selected_unit = st.selectbox("🏢 واحد:", ["همه"] + all_units)
         with f_col3:
             search_eq = st.text_input("🔍 نام تجهیز:", "")
-        with f_col4
+        with f_col4:
             point_list = ["همه"] + [f"P{i}" for i in range(1, 13)]
             selected_point = st.selectbox("📍 نقطه:", point_list)
         with f_col5:
