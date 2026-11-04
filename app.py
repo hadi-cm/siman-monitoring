@@ -45,26 +45,23 @@ logo_faz_fidar_base64 = get_image_base64("my_logo.png")
 st.markdown(f"""
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background-color: white; padding: 15px 30px; border-radius: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
         <img src="data:image/png;base64,{logo_faz_fidar_base64}" style="width: 110px; height: auto;">
-        <div style="text-align: center; color: #1E3A8D; font-size: 26px; font-weight: bold; font-family: 'Tahoma';">🛠️ سامانه پایش وضعیت تجهیزات سیمان تهران</div>
+        <div style="text-align: center; color: #1E3A8D; font-size: 26px; font-weight: bold; font-family: 'Tahoma';">🛠️ سامانه پایش وضعیت تجهیزات سیمان تهران</div >
         <img src="data:image/png;base64,{logo_siman_base64}" style="width: 110px; height: auto;">
-    </div>
+    </div >
     """, unsafe_allow_html=True)
 # ==============================================================================
 # 3. مدیریت داده‌ها و اتصال به گوگل‌شیت
 # ==============================================================================
-# لینک شیت ارتعاشات (تب اصلی)
+# لینک شیت اصلی (ارتعاشات)
 VIB_URL = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=0"
-# برای تب Assets، باید gid مربوط به آن تب را جایگزین کنید. فعلاً برنامه سعی میکند از طریق نام یا لینک شما متصل شود.
-# اگر تب Assets را ساختید، لینک خروجی CSV آن تب را اینجا قرار دهید.
+# لینک شیت مشخصات فنی (Assets) - حتماً باید gid مربوط به آن تب را در اینجا جایگزین کنید
 ASSETS_URL = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv" 
 @st.cache_data(ttl=60)
-def load_data():
+def load_all_data():
     try:
-        # بارگذاری داده‌های ارتعاشات
         df_vib = pd.read_csv(VIB_URL)
         df_vib.columns = df_vib.columns.str.strip()
         df_vib = df_vib.astype(str).apply(lambda x: x.str.strip())
-        # بارگذاری داده‌های Assets (مشخصات فنی)
         try:
             df_assets = pd.read_csv(ASSETS_URL)
             df_assets.columns = df_assets.columns.str.strip()
@@ -75,27 +72,23 @@ def load_data():
     except Exception as e:
         st.error(f"❌ خطا در دریافت داده‌ها: {e}")
         return None, None
-df, df_assets = load_data()
+df, df_assets = load_all_data()
 # ==============================================================================
 # 4. منطق هوشمند راهنمای نقاط (Point Map)
 # ==============================================================================
-def get_point_guide(equipment_name, equipment_type):
-    equipment_name = equipment_name.lower()
-    equipment_type = equipment_type.lower() if equipment_type else ""
-    # منطق فن‌ها
-    if "فن" in equipment_name or "فن" in equipment_type:
-        if "ایر اسلاید" in equipment_name:
+def get_point_guide(eq_name, eq_type):
+    name = eq_name.lower()
+    etype = eq_type.lower() if eq_type else ""
+    if "فن" in name or "فن" in etype:
+        if "ایر اسلاید" in name:
             return "P1: انتهای موتور | P2: سر موتور"
         return "P1: انتهای موتور | P2: سر موتور | P3: یاتاقان فیکس | P4: یاتاقان آزاد"
-    # منطق کمپرسور، پمپ، موتور، بلوئر
-    if any(x in equipment_name or x in equipment_type for x in ["کمپرسور", "پمپ", "موتور", "بلوئر"]):
+    if any(x in name or x in etype for x in ["کمپرسور", "پمپ", "موتور", "بلوئر"]):
         return "P1: انتهای موتور | P2: سر موتور | P3: محور ورودی/سر تجهیز | P4: انتهای تجهیز/سمت آزاد"
-    # منطق کراشر
-    if "کراشر" in equipment_name or "کراشر" in equipment_type:
+    if "کراشر" in name or "کراشر" in etype:
         return "P1: انتهای موتور | P2: سر موتور | P3: یاتاقان فیکس (صغیر) | P4: یاتاقان آزاد (صغیر) | P5: یاتاقان فیکس (کبیر) | P6: یاتاقان آزاد (کبیر)"
-    # منطق گیربکس
-    if "گیربکس" in equipment_name or "گیربکس" in equipment_type:
-        return "P1: انتهای موتور | P2: سر موتور | P3: محور ورودی | P4: محور خروجی | ... تا P12 (مطابق نقشه فنی)"
+    if "گیربکس" in name or "گیربکس" in etype:
+        return "P1: انتهای موتور | P2: سر موتور | P3: محور ورودی | P4: محور خروجی | ... (مطابق نقشه فنی)"
     return "راهنمای نقاط برای این تجهیز تعریف نشده است."
 # ==============================================================================
 # 5. رابط کاربری و فیلترها
@@ -135,26 +128,30 @@ if df is not None:
     # 6. بخش نمایش اطلاعات فنی (The Asset Intelligence)
     # ==============================================================================
     if not filtered_df.empty:
-        # برداشتن اولین تجهیز یافت شده برای نمایش مشخصات فنی
         sample_eq_name = filtered_df["عنوان تجهیز"].iloc[0]
         if df_assets is not None:
-            # جستجو در شیت Assets
             asset_info = df_assets[df_assets["نام تجهیز"] == sample_eq_name]
             if not asset_info.empty:
                 row = asset_info.iloc[0]
                 eq_type = row.get("نوع تجهیز", "نامشخص")
-                # نمایش کارت اطلاعات فنی
                 st.markdown(f"""
-                <div style="background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-left: 10px solid #1E3A8D; margin-bottom: 20px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05);">
-                    <h3 style="color: #1E3A8D; margin-top: 0;">🛠️ مشخصات فنی تجهیز: {sample_eq_name}</h3>
-                    <p style="font-size: 16px; color: #333;">
-                        <b>نوع تجهیز:</b> {eq_type} | <b>دور نامی:</b> {row.get('دور نامی', 'نامشخص')} RPM | <b>واحد:</b> {row.get('واحد', 'نامشخص')}
-                    </p>
-                    <div style="background-color: white; padding: 10px; border-radius: 10px; border: 1px solid #ddd;">
-                        <b>📌 راهنمای نقاط:</b> {get_point_guide(sample_eq_name, eq_type)}
+                <div style="background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-right: 10px solid #1E3A8D; margin-bottom: 20px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05);">
+                    <h3 style="color: #1E3A8D; margin-top: 0; font-family: 'Tahoma';">🛠️ مشخصات فنی تجهیز: {sample_eq_name}</h3>
+                    <div style="display: flex; justify-content: space-between; font-size: 16px; color: #333;">
+                        <span><b>🔹 نوع:</b> {eq_type}</span>
+                        <span><b>🔹 دور:</b> {row.get('دور نامی', 'نامشخص')} RPM</span>
+                        <span><b>🔹 واحد:</b> {row.get('واحد', 'نامشخص')}</span>
+                    </div>
+                    <hr style="border: 0.5px solid #ddd; margin: 15px 0;">
+                    <div style="background-color: white; padding: 12px; border-radius: 10px; border: 1px solid #dceefb; font-size: 15px; color: #1E3A8D;">
+                        <b>📌 راهنمای نقاط (P-Map):</b> {get_point_guide(sample_eq_name, eq_type)}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
+                # نمایش اطلاعات بیرینگ و سایر موارد در یک باکس جداگانه برای واحد خرید
+                with st.expander("📦 اطلاعات لجستیکی و قطعات (برای واحد خرید/تعمیرات)"):
+                    st.write(f"**📌 شماره بیرینگ:** {row.get('شماره بیرینگ', 'ثبت نشده')}")
+                    st.write(f"**📌 سیستم درایو:** {row.get('سیستم درایو', 'نامشخص')}")
             else:
                 st.warning(f"⚠️ مشخصات فنی برای تجهیز {sample_eq_name} در شیت Assets یافت نشد.")
         # نمایش تحلیل فنی سریع
@@ -186,6 +183,6 @@ if df is not None:
             st.dataframe(filtered_df, use_container_width=True, hide_index=True)
     else:
         st.info("🔎 هیچ داده‌ای با این فیلترها یافت نشد.")
-    st.markdown('<div style="text-align:center; margin-top:20px; font-weight:bold;">طراحی و توسعه: مهندس هادی زندیه | شرکت فاز فیدار پارسیان</div>', unsafe_allow_html=True)
+    st.markdown('<div style="text-align:center; margin-top:20px; font-weight:bold;">طراحی و توسعه: مهندس هادی زندیه | شرکت فاز فیدار پارسیان</div >', unsafe_allow_html=True)
 else:
     st.error("❌ خطا در دریافت داده‌ها. لطفاً اتصال اینترنت و لینک گوگل‌شیت را بررسی کنید.")
