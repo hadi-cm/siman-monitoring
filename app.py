@@ -50,7 +50,7 @@ st.markdown(f"""
     </div >
     """, unsafe_allow_html=True)
 # ==============================================================================
-# 3. مدیریت داده‌ها
+# 3. مدیریت داده‌ها (با اصلاح اصلی برای ردیف‌های خالی)
 # ==============================================================================
 VIB_URL = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=0"
 ASSETS_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTI4vONsowudctVbskGkkSyQNqkkGZ8AuiykO9UKeE-8FSBZemWkR4q5DSAhpXEqwQkgsCUQy44Vvqx/pub?gid=1276803564&single=true&output=csv"
@@ -59,9 +59,14 @@ def load_all_data():
     try:
         df_vib = pd.read_csv(VIB_URL)
         df_vib.columns = df_vib.columns.str.strip()
+        # پیدا کردن ستون عنوان تجهیز
         title_col = next((c for c in df_vib.columns if "عنوان تجهیز" in c or "نام تجهیز" in c), None)
         if title_col:
-            df_vib[title_col] = df_vib[title_col].replace(r'^\s*$', pd.NA, regex=True).ffill()
+            # مرحله حیاتی: پر کردن سلول‌های خالی با مقدار ردیف بالایی (FFILL)
+            # این کار باعث می‌شود P2 تا P11 هم نام تجهیز داشته باشند
+            df_vib[title_col] = df_vib[title_col].replace(r'^\s*$', pd.NA, regex=True)
+            df_vib[title_col] = df_vib[title_col].ffill()
+        # تبدیل همه چیز به رشته برای جلوگیری از خطای AttributeError
         df_vib = df_vib.astype(str).apply(lambda x: x.str.strip())
         try:
             df_assets = pd.read_csv(ASSETS_URL)
@@ -123,45 +128,46 @@ if df is not None:
     if col_line and selected_line != "همه": filtered_df = filtered_df[filtered_df[col_line] == selected_line]
     if col_unit and selected_unit != "همه": filtered_df = filtered_df[filtered_df[col_unit] == selected_unit]
     if col_title and search_eq: filtered_df = filtered_df[filtered_df[col_title].str.contains(search_eq, case=False, na=False)]
-    # شناسایی ستون نقطه
+    # شناسایی ستون نقطه (با استفاده از رگکس امن)
     point_col = None
     for col in df.columns:
         if "نقطه" in str(col) or "point" in str(col).lower() or df[col].astype(str).str.contains(r'P\d+', na=False).any():
             point_col = col
             break
     if point_col and selected_point != "همه":
-        filtered_df = filtered_df[filtered_df[point_col].astype(str).str.upper() == selected_point.upper()]
+        # فیلتر کردن بر اساس مقدار نقطه (مثلاً P2)
+        filtered_df = filtered_df[filtered_df[point_col].str.upper() == selected_point.upper()]
     if col_date and selected_date != "همه تاریخ‌ها": filtered_df = filtered_df[filtered_df[col_date] == selected_date]
     # ==============================================================================
     # 6. نمایش مشخصات فنی و جداول
     # ==============================================================================
     if not filtered_df.empty:
-        # دریافت نام تجهیز از نتایج فیلتر شده (به جای سطر اول، نام را به عنوان کلید می‌گیریم)
         eq_name_val = filtered_df[col_title].iloc[0] if col_title else "نامشخص"
         asset_row = None
         if df_assets is not None:
             asset_name_col = next((c for c in df_assets.columns if "نام" in c or "تجهیز" in c), None)
             if asset_name_col:
-                # جستجوی دقیق در شیت Assets بر اساس نام تجهیز
                 match = df_assets[df_assets[asset_name_col] == eq_name_val]
                 if not match.empty:
                     asset_row = match.iloc[0]
                 else:
-                    # اگر پیدا نشد، جستجوی تقریبی (Fuzzy Match)
+                    # جستجوی تقریبی اگر نام دقیق پیدا نشد
                     parts = eq_name_val.split()
                     if len(parts) > 0:
                         fuzzy_match = df_assets[df_assets[asset_name_col].str.contains(parts[0], na=False)]
                         if not fuzzy_match.empty: asset_row = fuzzy_match.iloc[0]
         if asset_row is not None:
-            def get_val(keyword):
+            def get_safe_val(keyword):
                 col = next((c for c in df_assets.columns if keyword in c), None)
-                return asset_row[col] if col else "نامشخص"
-            eq_type = get_val("نوع")
-            bearing = get_val("بیرینگ")
-            bush = get_val("بوش")
-            rpm = get_val("دور")
-            unit_val = get_val("واحد")
-            if str(bush).lower() in ['nan', 'none', '']: bush = "---"
+                if col:
+                    v = str(asset_row[col]).strip()
+                    return v if v.lower() not in ['nan', 'none', ''] else "---"
+                return "نامشخص"
+            eq_type = get_safe_val("نوع")
+            bearing = get_safe_val("بیرینگ")
+            bush = get_safe_val("بوش")
+            rpm = get_safe_val("دور")
+            unit_val = get_safe_val("واحد")
             st.markdown(f"""
             <div style="background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-right: 10px solid #1E3A8D; margin-bottom: 15px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05);">
                 <h3 style="color: #1E3A8D; margin-top: 0; font-family: 'Tahoma';">🛠️ مشخصات فنی تجهیز: {eq_name_val}</h3>
@@ -169,11 +175,11 @@ if df is not None:
                     <span><b style="color: #1E3A8D;">🔹 نوع:</b> {eq_type}</span>
                     <span><b style="color: #1E3A8D;">🔹 دور:</b> {rpm} RPM</span>
                     <span><b style="color: #1E3A8D;">🔹 واحد:</b> {unit_val}</span>
-                </div >
+                </div>
                 <div style="margin-top: 12px; font-size: 15px; color: #1E3A8D; background: #e6efff; padding: 8px 15px; border-radius: 8px; display: inline-block;">
                     <b style="color: #1E3A8D;">📍 راهنمای نقاط (P-Map):</b> {get_point_guide(eq_name_val, eq_type)}
-                </div >
-            </div >
+                </div>
+            </div>
             """, unsafe_allow_html=True)
             with st.expander("📦 اطلاعات لجستیکی و قطعات (بیرینگ و بوش)", expanded=True):
                 c1, c2 = st.columns(2)
