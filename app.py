@@ -1,7 +1,6 @@
 import pandas as pd
 import streamlit as st
 import base64
-
 # ==============================================================================
 # 1. تنظیمات امنیتی و دسترسی
 # ==============================================================================
@@ -12,7 +11,6 @@ USER_CREDENTIALS = {
     "tehrancement@gmail.com": "siman123",
     "masoud.sa.1989823@gmail.com": "siman123",
 }
-
 def check_password():
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
@@ -31,24 +29,19 @@ def check_password():
                     st.error("❌ ایمیل یا رمز عبور اشتباه است.")
         return False
     return True
-
 if not check_password():
     st.stop()
-
 # ==============================================================================
 # 2. پیکربندی صفحه و استایل‌ها
 # ==============================================================================
 st.set_page_config(page_title="داشبورد فنی ارتعاشات سیمان تهران", layout="wide")
-
 def get_image_base64(path):
     try:
         with open(path, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode()
     except: return ""
-
 logo_siman_base64 = get_image_base64("client_logo.png")
 logo_faz_fidar_base64 = get_image_base64("my_logo.png")
-
 st.markdown(f"""
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background-color: white; padding: 15px 30px; border-radius: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
         <img src="data:image/png;base64,{logo_faz_fidar_base64}" style="width: 110px; height: auto;">
@@ -56,22 +49,19 @@ st.markdown(f"""
         <img src="data:image/png;base64,{logo_siman_base64}" style="width: 110px; height: auto;">
     </div >
     """, unsafe_allow_html=True)
-
 # ==============================================================================
 # 3. مدیریت داده‌ها
 # ==============================================================================
 VIB_URL = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=0"
 ASSETS_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTI4vONsowudctVbskGkkSyQNqkkGZ8AuiykO9UKeE-8FSBZemWkR4q5DSAhpXEqwQkgsCUQy44Vvqx/pub?gid=1276803564&single=true&output=csv"
-
 @st.cache_data(ttl=60)
 def load_all_data():
     try:
         df_vib = pd.read_csv(VIB_URL)
         df_vib.columns = df_vib.columns.str.strip()
-
         title_col = next((c for c in df_vib.columns if "عنوان تجهیز" in c or "نام تجهیز" in c), None)
         if title_col:
-            df_vib[title_col] = df_vib[title_col].replace(r'^\s$', pd.NA, regex=True).ffill()
+            df_vib[title_col] = df_vib[title_col].replace(r'^\s*$', pd.NA, regex=True).ffill()
         df_vib = df_vib.astype(str).apply(lambda x: x.str.strip())
         try:
             df_assets = pd.read_csv(ASSETS_URL)
@@ -133,28 +123,33 @@ if df is not None:
     if col_line and selected_line != "همه": filtered_df = filtered_df[filtered_df[col_line] == selected_line]
     if col_unit and selected_unit != "همه": filtered_df = filtered_df[filtered_df[col_unit] == selected_unit]
     if col_title and search_eq: filtered_df = filtered_df[filtered_df[col_title].str.contains(search_eq, case=False, na=False)]
-    # شناسایی ستون نقطه به صورت منعطف‌تر
-    point_col = next((c for c in df.columns if df[c].astype(str).str.contains(r'(P\d+|نقطه)', na=False).any()), None)
+    # شناسایی ستون نقطه
+    point_col = None
+    for col in df.columns:
+        if "نقطه" in str(col) or "point" in str(col).lower() or df[col].astype(str).str.contains(r'P\d+', na=False).any():
+            point_col = col
+            break
     if point_col and selected_point != "همه":
-        # فیلتر کردن به صورت منعطف (اگر کاربر P1 را زد، هم P1 و هم هر چیزی که شامل 1 باشد را چک کند)
-        point_val = selected_point.replace('P', '').strip()
-        filtered_df = filtered_df[filtered_df[point_col].astype(str).str.contains(point_val, na=False)]
+        filtered_df = filtered_df[filtered_df[point_col].astype(str).str.upper() == selected_point.upper()]
     if col_date and selected_date != "همه تاریخ‌ها": filtered_df = filtered_df[filtered_df[col_date] == selected_date]
     # ==============================================================================
     # 6. نمایش مشخصات فنی و جداول
     # ==============================================================================
     if not filtered_df.empty:
+        # دریافت نام تجهیز از نتایج فیلتر شده (به جای سطر اول، نام را به عنوان کلید می‌گیریم)
         eq_name_val = filtered_df[col_title].iloc[0] if col_title else "نامشخص"
         asset_row = None
         if df_assets is not None:
             asset_name_col = next((c for c in df_assets.columns if "نام" in c or "تجهیز" in c), None)
             if asset_name_col:
+                # جستجوی دقیق در شیت Assets بر اساس نام تجهیز
                 match = df_assets[df_assets[asset_name_col] == eq_name_val]
                 if not match.empty:
                     asset_row = match.iloc[0]
                 else:
+                    # اگر پیدا نشد، جستجوی تقریبی (Fuzzy Match)
                     parts = eq_name_val.split()
-                    if len(parts) > 1:
+                    if len(parts) > 0:
                         fuzzy_match = df_assets[df_assets[asset_name_col].str.contains(parts[0], na=False)]
                         if not fuzzy_match.empty: asset_row = fuzzy_match.iloc[0]
         if asset_row is not None:
@@ -185,7 +180,7 @@ if df is not None:
                 with c1: st.markdown(f"**🛢️ شماره بیرینگ:*\n`{bearing}`")
                 with c2: st.markdown(f"⚙️ شماره بوش:*\n`{bush}`")
         else:
-            st.warning(f"⚠️ مشخصات فنی برای تجهیز '{eq_name_val}' یافت نشد.")
+            st.warning(f"⚠️ مشخصات فنی برای تجهیز '{eq_name_val}' در شیت Assets یافت نشد.")
         m1, m2, m3 = st.columns(3)
         with m1: st.metric("تعداد رکورد یافت شده", len(filtered_df))
         with m2:
