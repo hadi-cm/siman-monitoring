@@ -63,8 +63,7 @@ def load_all_data():
         title_col = next((c for c in df_vib.columns if "عنوان تجهیز" in c or "نام تجهیز" in c), None)
         if title_col:
             # ابتدا سلول‌های خالی را پیدا می‌کنیم و مقدار ردیف قبلی را در آن‌ها قرار می‌دهیم
-            df_vib[title_col] = df_vib[title_col].replace('', None).replace('nan', None).fillna(method='ffill')
-        df_vib = df_vib.astype(str).apply(lambda x: x.str.strip())
+df_vib[title_col] = df_vib[title_col].replace('', None).replace('nan', None).fillna(method='ffill')        df_vib = df_vib.astype(str).apply(lambda x: x.str.strip())
         try:
             df_assets = pd.read_csv(ASSETS_URL)
             df_assets.columns = df_assets.columns.str.strip()
