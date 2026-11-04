@@ -1,4 +1,3 @@
-``python
 import pandas as pd
 import streamlit as st
 import base64
@@ -33,7 +32,7 @@ def check_password():
 if not check_password():
     st.stop()
 # ==============================================================================
-# 2. پیکربندی صفحه و استایل‌های CSS
+# 2. پیکربندی صفحه و استایل‌ها
 # ==============================================================================
 st.set_page_config(page_title="داشبورد فنی ارتعاشات سیمان تهران", layout="wide")
 def get_image_base64(path):
@@ -53,18 +52,15 @@ st.markdown(f"""
 # ==============================================================================
 # 3. مدیریت داده‌ها و اتصال به گوگل‌شیت
 # ==============================================================================
-# لینک شیت اصلی (ارتعاشات)
+# !!! حتماً لینک‌های زیر را با لینک‌های واقعی گوگل‌شیت خود جایگزین کنید !!!
 VIB_URL = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=0"
-# لینک شیت مشخصات فنی (Assets) - اصلاح شده بر اساس آخرین پیام شما
-ASSETS_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTI4vONsowudctVbskGkkSyQNqkkGZ8AuiykO9UKeE-8FSBZemWkR4q5DSAhpXEqwQkgsCUQy44Vvqx/pub?gid=1276803564&single=true&output=csv" 
+ASSETS_URL = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv" # اگر Tab دیگری است، لینک آن را بگذارید
 @st.cache_data(ttl=60)
 def load_all_data():
     try:
-        # بارگذاری ارتعاشات
         df_vib = pd.read_csv(VIB_URL)
         df_vib.columns = df_vib.columns.str.strip()
         df_vib = df_vib.astype(str).apply(lambda x: x.str.strip())
-        # بارگذاری Assets
         try:
             df_assets = pd.read_csv(ASSETS_URL)
             df_assets.columns = df_assets.columns.str.strip()
@@ -121,47 +117,43 @@ if df is not None:
     if selected_line != "همه": filtered_df = filtered_df[filtered_df["خط تولید"] == selected_line]
     if selected_unit != "همه": filtered_df = filtered_df[filtered_df["واحد"] == selected_unit]
     if search_eq: filtered_df = filtered_df[filtered_df["عنوان تجهیز"].str.contains(search_eq, case=False, na=False)]
-    # فیلتر نقطه (هوشمند)
     point_col_name = next((col for col in df.columns if df[col].astype(str).str.contains('P\d+', na=False).any()), None)
     if point_col_name and selected_point != "همه":
         filtered_df = filtered_df[filtered_df[point_col_name] == selected_point]
     if selected_date != "همه تاریخ‌ها" and date_col_name:
         filtered_df = filtered_df[filtered_df[date_col_name] == selected_date]
     # ==============================================================================
-    # 6. بخش نمایش اطلاعات فنی (Asset Intelligence)
+    # 6. نمایش مشخصات فنی و تحلیل (بخش هوشمند)
     # ==============================================================================
     if not filtered_df.empty:
         sample_eq_name = filtered_df["عنوان تجهیز"].iloc[0]
         if df_assets is not None:
-            # جستجو در شیت Assets بر اساس نام تجهیز
             asset_info = df_assets[df_assets["نام تجهیز"] == sample_eq_name]
             if not asset_info.empty:
                 row = asset_info.iloc[0]
                 eq_type = row.get("نوع تجهیز", "نامشخص")
-                bosh_info = row.get("بوش", "ندارد")
                 st.markdown(f"""
                 <div style="background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-right: 10px solid #1E3A8D; margin-bottom: 20px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05);">
                     <h3 style="color: #1E3A8D; margin-top: 0; font-family: 'Tahoma';">🛠️ مشخصات فنی تجهیز: {sample_eq_name}</h3>
-                    <div style="display: flex; justify-content: space-between; font-size: 16px; color: #333; flex-wrap: wrap; gap: 10px;">
-                        <span><b>🔹 نوع:</b> {eq_type}</span>
-                        <span><b>🔹 دور:</b> {row.get('دور نامی', 'نامشخص')} RPM</span>
-                        <span><b>🔹 واحد:</b> {row.get('واحد', 'نامشخص')}</span>
-                    </div >
+                    <div style="display: flex; justify-content: space-between; font-size: 16px; color: #333;">
+                        <span><b style="color: #1E3A8D;">🔹 نوع:</b> {eq_type}</span>
+                        <span><b style="color: #1E3A8D;">🔹 دور:</b> {row.get('دور نامی', 'نامشخص')} RPM</span>
+                        <span><b style="color: #1E3A8D;">🔹 واحد:</b> {row.get('واحد', 'نامشخص')}</span>
+                    </div>
                     <hr style="border: 0.5px solid #ddd; margin: 15px 0;">
                     <div style="background-color: white; padding: 12px; border-radius: 10px; border: 1px solid #dceefb; font-size: 15px; color: #1E3A8D;">
-                        <b>📌 راهنمای نقاط (P-Map):</b> {get_point_guide(sample_eq_name, eq_type)}
-                    </div >
-                </div >
+                        <b style="color: #1E3A8D;">📌 راهنمای نقاط (P-Map):</b> {get_point_guide(sample_eq_name, eq_type)}
+                    </div>
+                </div>
                 """, unsafe_allow_html=True)
-                # نمایش اطلاعات بیرینگ و بوش برای واحد خرید و تعمیرات
-                with st.expander("📦 جزئیات قطعات و لجستیک (بیشتر)"):
-                    c1, c2, c3 = st.columns(3)
-                    with c1: st.write(f"**📌 شماره بیرینگ:** {row.get('شماره بیرینگ', 'ثبت نشده')}")
-                    with c2: st.write(f"**📌 بوش / آداپتور:** {bosh_info if bosh_info != 'nan' else 'ندارد'}")
-                    with c3: st.write(f"**📌 سیستم درایو:** {row.get('سیستم درایو', 'نامشخص')}")
+                with st.expander("📦 اطلاعات لجستیکی و قطعات (برای واحد خرید/تعمیرات)"):
+                    st.write(f"**📌 شماره بیرینگ:** {row.get('شماره بیرینگ', 'ثبت نشده')}")
+                    if row.get('بوش', 'نامشخص') != 'nan' and row.get('بوش', 'نامشخص') != 'None':
+                        st.write(f"**📌 مدل بوش:** {row.get('بوش', 'ثبت نشده')}")
+                    st.write(f"**📌 سیستم درایو:** {row.get('سیستم درایو', 'نامشخص')}")
             else:
-                st.warning(f"⚠️ مشخصات فنی برای تجهیز {sample_eq_name} در شیت Assets یافت نشد. لطفاً نام تجهیز را در هر دو شیت یکسان وارد کنید.")
-        # نمایش تحلیل فنی سریع
+                st.warning(f"⚠️ مشخصات فنی برای تجهیز {sample_eq_name} در شیت Assets یافت نشد.")
+        # تحلیل سریع
         m1, m2, m3 = st.columns(3)
         with m1: st.metric("تعداد رکورد یافت شده", len(filtered_df))
         with m2:
@@ -172,7 +164,7 @@ if df is not None:
                 total_cost = pd.to_numeric(filtered_df["هزینه"].str.replace(r'[^\d.]', '', regex=True), errors='coerce').sum()
                 st.metric("جمع کل هزینه‌ها", f"{total_cost:,.0f} تومان")
             except: st.metric("جمع کل هزینه‌ها", "نامشخص")
-        # نمایش جدول با رنگ‌بندی ارتعاشات
+        # نمایش جدول اصلی
         st.markdown("### 📋 جدول جزئیات پایش و مقایسه")
         vib_cols = [col for col in filtered_df.columns if any(name in str(col) for name in ["افقی", "عمودی", "محوری", "mm/s"])]
         def color_vibration(val):
