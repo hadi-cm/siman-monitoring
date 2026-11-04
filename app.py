@@ -50,20 +50,16 @@ st.markdown(f"""
     </div >
     """, unsafe_allow_html=True)
 # ==============================================================================
-# 3. مدیریت داده‌ها و اتصال به گوگل‌شیت
+# 3. مدیریت داده‌ها (اتصال به گوگل‌شیت)
 # ==============================================================================
-# لینک شیت ارتعاشات (Main)
 VIB_URL = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=0"
-# لینک شیت Assets (مشخصات فنی)
 ASSETS_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTI4vONsowudctVbskGkkSyQNqkkGZ8AuiykO9UKeE-8FSBZemWkR4q5DSAhpXEqwQkgsCUQy44Vvqx/pub?gid=1276803564&single=true&output=csv"
 @st.cache_data(ttl=60)
 def load_all_data():
     try:
-        # بارگذاری شیت ارتعاشات
         df_vib = pd.read_csv(VIB_URL)
         df_vib.columns = df_vib.columns.str.strip()
         df_vib = df_vib.astype(str).apply(lambda x: x.str.strip())
-        # بارگذاری شیت Assets
         try:
             df_assets = pd.read_csv(ASSETS_URL)
             df_assets.columns = df_assets.columns.str.strip()
@@ -76,20 +72,28 @@ def load_all_data():
         return None, None
 df, df_assets = load_all_data()
 # ==============================================================================
-# 4. منطق هوشمند راهنمای نقاط (Point Map)
+# 4. راهنمای نقاط (به‌روزرسانی شده: ۱۱ نقطه گیربکس + ۶ نقطه کراشر)
 # ==============================================================================
 def get_point_guide(eq_name, eq_type):
     name = eq_name.lower()
     etype = eq_type.lower() if eq_type else ""
+    if "گیربکس" in name or "گیربکس" in etype:
+        return (
+            "P1: انتهای موتور | P2: جلوی موتور | P3: محور ورودی گیربکس | P4: سمت آزاد محور ورودی | "
+            "P5: سمت فیکس محور دوم | P6: سمت آزاد محور دوم | P7: سمت فیکس محور سوم | P8: سمت آزاد محور سوم | "
+            "P9: بابیت اول سمت گیربکس | P10: بابیت دوم | P11: بابیت نزدیک پینیون آسیاب"
+        )
+    if "کراشر" in name or "کراشر" in etype:
+        return (
+            "P1: انتهای موتور | P2: سر موتور | "
+            "P3: یاتاقان سمت فیکس (پولی کوچک) | P4: یاتاقان سمت آزاد (پولی کوچک) | "
+            "P5: یاتاقان فیکس (روتور) | P6: یاتاقان سمت آزاد (روتور)"
+        )
     if "فن" in name or "فن" in etype:
         if "ایر اسلاید" in name: return "P1: انتهای موتور | P2: سر موتور"
         return "P1: انتهای موتور | P2: سر موتور | P3: یاتاقان فیکس | P4: یاتاقان آزاد"
     if any(x in name or x in etype for x in ["کمپرسور", "پمپ", "موتور", "بلوئر"]):
-        return "P1: انتهای موتور | P2: سر موتور | P3: محور ورودی/سر تجهیز | P4: انتهای تجهیز/سمت آزاد"
-    if "کراشر" in name or "کراشر" in etype:
-        return "P1: انتهای موتور | P2: سر موتور | P3: یاتاقان فیکس (صغیر) | P4: یاتاقان آزاد (صغیر) | P5: یاتاقان فیکس (کبیر) | P6: یاتاقان آزاد (کبیر)"
-    if "گیربکس" in name or "گیربکس" in etype:
-        return "P1: انتهای موتور | P2: سر موتور | P3: محور ورودی | P4: محور خروجی | ... (مطابق نقشه فنی)"
+        return "P1: انتهای موتور | P2: سر موتور | P3: محور ورودی | P4: محور خروجی"
     return "راهنمای نقاط برای این تجهیز تعریف نشده است."
 # ==============================================================================
 # 5. رابط کاربری و فیلترها
@@ -105,7 +109,7 @@ if df is not None:
             selected_unit = st.selectbox("🏢 واحد:", ["همه"] + all_units)
         with f_col3:
             search_eq = st.text_input("🔍 نام تجهیز:", "")
-        with f_col4:
+        with f_col4
             point_list = ["همه"] + [f"P{i}" for i in range(1, 13)]
             selected_point = st.selectbox("📍 نقطه:", point_list)
         with f_col5:
@@ -114,7 +118,6 @@ if df is not None:
             if date_col_name:
                 available_dates = sorted(df[date_col_name].unique(), reverse=True)
                 selected_date = st.selectbox("📅 تاریخ:", ["همه تاریخ‌ها"] + list(available_dates))
-    # اعمال فیلترها
     filtered_df = df.copy()
     if selected_line != "همه": filtered_df = filtered_df[filtered_df["خط تولید"] == selected_line]
     if selected_unit != "همه": filtered_df = filtered_df[filtered_df["واحد"] == selected_unit]
@@ -125,48 +128,50 @@ if df is not None:
     if selected_date != "همه تاریخ‌ها" and date_col_name:
         filtered_df = filtered_df[filtered_df[date_col_name] == selected_date]
     # ==============================================================================
-    # 6. نمایش مشخصات فنی (نسخه ضد خطا و هوشمند)
+    # 6. نمایش مشخصات فنی (باکس آبی + باکس قطعات)
     # ==============================================================================
     if not filtered_df.empty:
         sample_eq_name = filtered_df["عنوان تجهیز"].iloc[0]
+        asset_info = None
         if df_assets is not None:
-            # پیدا کردن ستون نام تجهیز در Assets (حتی اگر نام ستون کمی تغییر کرده باشد)
             asset_name_col = next((col for col in df_assets.columns if "نام" in col and "تجهیز" in col), None)
             if asset_name_col:
                 asset_info = df_assets[df_assets[asset_name_col] == sample_eq_name]
-                if not asset_info.empty:
-                    row = asset_info.iloc[0]
-                    # شناسایی هوشمند سایر ستون‌ها
-                    eq_type = next((row[c] for c in df_assets.columns if "نوع" in c), "نامشخص")
-                    bearing = next((row[c] for c in df_assets.columns if "بیرینگ" in c), "ثبت نشده")
-                    bush = next((row[c] for c in df_assets.columns if "بوش" in c), "---")
-                    if bush in ['nan', 'None', '']: bush = "---"
-                    rpm = next((row[c] for c in df_assets.columns if "دور" in c), "نامشخص")
-                    unit_val = next((row[c] for c in df_assets.columns if "واحد" in c), "نامشخص")
-                    drive = next((row[c] for c in df_assets.columns if "درایو" in c), "نامشخص")
-                    st.markdown(f"""
-                    <div style="background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-right: 10px solid #1E3A8D; margin-bottom: 20px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05);">
-                        <h3 style="color: #1E3A8D; margin-top: 0; font-family: 'Tahoma';">🛠️ مشخصات فنی تجهیز: {sample_eq_name}</h3>
-                        <div style="display: flex; justify-content: space-between; font-size: 16px; color: #333;">
-                            <span><b style="color: #1E3A8D;">🔹 نوع:</b> {eq_type}</span>
-                            <span><b style="color: #1E3A8D;">🔹 دور:</b> {rpm} RPM</span>
-                            <span><b style="color: #1E3A8D;">🔹 واحد:</b> {unit_val}</span>
-                        </div >
-                        <hr style="border: 0.5px solid #ddd; margin: 15px 0;">
-                        <div style="background-color: white; padding: 12px; border-radius: 10px; border: 1px solid #dceefb; font-size: 15px; color: #1E3A8D;">
-                            <b style="color: #1E3A8D;">📌 راهنمای نقاط (P-Map):</b> {get_point_guide(sample_eq_name, eq_type)}
-                        </div >
-                    </div >
-                    """, unsafe_allow_html=True)
-                    with st.expander("📦 اطلاعات لجستیکی و قطعات (برای واحد خرید/تعمیرات)"):
-                        st.write(f"**📌 شماره بیرینگ:** {bearing}")
-                        st.write(f"**📌 مدل بوش/آداپتور:** {bush}")
-                        st.write(f"**📌 سیستم درایو:** {drive}")
-                else:
-                    st.warning(f"⚠️ مشخصات فنی برای تجهیز '{sample_eq_name}' در شیت Assets یافت نشد.")
-            else:
-                st.error("❌ ستون 'نام تجهیز' در شیت Assets پیدا نشد. لطفاً نام ستون را در گوگل‌شیت چک کنید.")
-        # تحلیل سریع (متریک‌ها)
+        if asset_info is None or asset_info.empty:
+            asset_info = df[df["عنوان تجهیز"] == sample_eq_name]
+        if asset_info is not None and not asset_info.empty:
+            row = asset_info.iloc[0]
+            eq_type = next((row[c] for c in (df_assets.columns if df_assets is not None else df.columns) if "نوع" in c), "نامشخص")
+            bearing = next((row[c] for c in (df_assets.columns if df_assets is not None else df.columns) if "بیرینگ" in c), "ثبت نشده")
+            bush = next((row[c] for c in (df_assets.columns if df_assets is not None else df.columns) if "بوش" in c), "---")
+            rpm = next((row[c] for c in (df_assets.columns if df_assets is not None else df.columns) if "دور" in c), "نامشخص")
+            unit_val = next((row[c] for c in (df_assets.columns if df_assets is not None else df.columns) if "واحد" in c), "نامشخص")
+            if bush in ['nan', 'None', '']: bush = "---"
+            st.markdown(f"""
+            <div style="background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-right: 10px solid #1E3A8D; margin-bottom: 15px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05);">
+                <h3 style="color: #1E3A8D; margin-top: 0; font-family: 'Tahoma';">🛠️ مشخصات فنی تجهیز: {sample_eq_name}</h3>
+                <div style="display: flex; justify-content: space-between; font-size: 16px; color: #333; flex-wrap: wrap; gap: 10px;">
+                    <span><b style="color: #1E3A8D;">🔹 نوع:</b> {eq_type}</span>
+                    <span><b style="color: #1E3A8D;">🔹 دور:</b> {rpm} RPM</span>
+                    <span><b style="color: #1E3A8D;">🔹 واحد:</b> {unit_val}</span>
+                </div>
+                <div style="margin-top: 12px; font-size: 15px; color: #1E3A8D; background: #e6efff; padding: 8px 15px; border-radius: 8px; display: inline-block;">
+                    <b style="color: #1E3A8D;">📍 راهنمای نقاط (P-Map):</b> {get_point_guide(sample_eq_name, eq_type)}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            with st.container():
+                st.markdown("<div style='padding-right: 20px;'>", unsafe_allow_html=True)
+                with st.expander("📦 اطلاعات لجستیکی و قطعات (بیرینگ و بوش)", expanded=True):
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.markdown(f"**🛢️ شماره بیرینگ:*\n`{bearing}`")
+                    with c2:
+                        st.markdown(f"⚙️ شماره بوش:*\n`{bush}`")
+                st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.warning(f"⚠️ مشخصات فنی برای تجهیز '{sample_eq_name}' یافت نشد.")
+        # متریک‌ها
         m1, m2, m3 = st.columns(3)
         with m1: st.metric("تعداد رکورد یافت شده", len(filtered_df))
         with m2:
@@ -177,7 +182,6 @@ if df is not None:
                 total_cost = pd.to_numeric(filtered_df["هزینه"].str.replace(r'[^\d.]', '', regex=True), errors='coerce').sum()
                 st.metric("جمع کل هزینه‌ها", f"{total_cost:,.0f} تومان")
             except: st.metric("جمع کل هزینه‌ها", "نامشخص")
-        # جدول ارتعاشات با رنگ‌بندی
         st.markdown("### 📋 جدول جزئیات پایش و مقایسه")
         vib_cols = [col for col in filtered_df.columns if any(name in str(col) for name in ["افقی", "عمودی", "محوری", "mm/s"])]
         def color_vibration(val):
