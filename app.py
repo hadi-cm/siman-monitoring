@@ -1,6 +1,7 @@
 import pandas as pd
 import streamlit as st
 import base64
+
 # ==============================================================================
 # 1. تنظیمات امنیتی و دسترسی
 # ==============================================================================
@@ -11,6 +12,7 @@ USER_CREDENTIALS = {
     "tehrancement@gmail.com": "siman123",
     "masoud.sa.1989823@gmail.com": "siman123",
 }
+
 def check_password():
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
@@ -29,19 +31,24 @@ def check_password():
                     st.error("❌ ایمیل یا رمز عبور اشتباه است.")
         return False
     return True
+
 if not check_password():
     st.stop()
+
 # ==============================================================================
 # 2. پیکربندی صفحه و استایل‌ها
 # ==============================================================================
 st.set_page_config(page_title="داشبورد فنی ارتعاشات سیمان تهران", layout="wide")
+
 def get_image_base64(path):
     try:
         with open(path, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode()
     except: return ""
+
 logo_siman_base64 = get_image_base64("client_logo.png")
 logo_faz_fidar_base64 = get_image_base64("my_logo.png")
+
 st.markdown(f"""
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background-color: white; padding: 15px 30px; border-radius: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
         <img src="data:image/png;base64,{logo_faz_fidar_base64}" style="width: 110px; height: auto;">
@@ -49,24 +56,28 @@ st.markdown(f"""
         <img src="data:image/png;base64,{logo_siman_base64}" style="width: 110px; height: auto;">
     </div >
     """, unsafe_allow_html=True)
+
 # ==============================================================================
-# 3. مدیریت داده‌ها (با اصلاح اصلی برای ردیف‌های خالی)
+# 3. مدیریت داده‌ها (اصلاح هوشمند برای ساختار شیت شما)
 # ==============================================================================
 VIB_URL = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=0"
 ASSETS_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTI4vONsowudctVbskGkkSyQNqkkGZ8AuiykO9UKeE-8FSBZemWkR4q5DSAhpXEqwQkgsCUQy44Vvqx/pub?gid=1276803564&single=true&output=csv"
+
 @st.cache_data(ttl=60)
 def load_all_data():
     try:
         df_vib = pd.read_csv(VIB_URL)
         df_vib.columns = df_vib.columns.str.strip()
+
         # پیدا کردن ستون عنوان تجهیز
         title_col = next((c for c in df_vib.columns if "عنوان تجهیز" in c or "نام تجهیز" in c), None)
+
         if title_col:
-            # مرحله حیاتی: پر کردن سلول‌های خالی با مقدار ردیف بالایی (FFILL)
-            # این کار باعث می‌شود P2 تا P11 هم نام تجهیز داشته باشند
-            df_vib[title_col] = df_vib[title_col].replace(r'^\s*$', pd.NA, regex=True)
+            # ۱. ابتدا ردیف‌های کاملاً خالی را شناسایی می‌کنیم
+            # ۲. با استفاده از ffill، نام تجهیز را به ردیف‌های خالی (که مربوط به همان تجهیز هستند) منتقل می‌کنیم
+            df_vib[title_col] = df_vib[title_col].replace(r'^\s$', pd.NA, regex=True)
             df_vib[title_col] = df_vib[title_col].ffill()
-        # تبدیل همه چیز به رشته برای جلوگیری از خطای AttributeError
+        # تبدیل همه داده‌ها به رشته برای جلوگیری از خطای مقایسه عدد با متن
         df_vib = df_vib.astype(str).apply(lambda x: x.str.strip())
         try:
             df_assets = pd.read_csv(ASSETS_URL)
@@ -104,6 +115,7 @@ if df is not None:
         col_line = next((c for c in df.columns if "خط تولید" in c), None)
         with f_col1:
             if col_line:
+                # اصلاح فیلتر خط تولید: تبدیل همه مقادیر به متن برای جلوگیری از خطای عدد/متن
                 all_lines = sorted({str(v).strip() for v in df[col_line].unique() if str(v).strip() and str(v).strip().lower() != "nan"})
                 selected_line = st.selectbox("📍 خط تولید:", ["همه"] + list(all_lines))
             else: selected_line = "همه"
@@ -125,23 +137,29 @@ if df is not None:
                 selected_date = st.selectbox("📅 تاریخ:", ["همه تاریخ‌ها"] + list(all_dates))
             else: selected_date = "همه تاریخ‌ها"
     filtered_df = df.copy()
-    if col_line and selected_line != "همه": filtered_df = filtered_df[filtered_df[col_line] == selected_line]
-    if col_unit and selected_unit != "همه": filtered_df = filtered_df[filtered_df[col_unit] == selected_unit]
-    if col_title and search_eq: filtered_df = filtered_df[filtered_df[col_title].str.contains(search_eq, case=False, na=False)]
-    # شناسایی ستون نقطه (با استفاده از رگکس امن)
+    if col_line and selected_line != "همه": 
+        filtered_df = filtered_df[filtered_df[col_line] == selected_line]
+    if col_unit and selected_unit != "همه": 
+        filtered_df = filtered_df[filtered_df[col_unit] == selected_unit]
+    if col_title and search_eq: 
+        filtered_df = filtered_df[filtered_df[col_title].str.contains(search_eq, case=False, na=False)]
+    # شناسایی ستون نقطه
     point_col = None
     for col in df.columns:
-        if "نقطه" in str(col) or "point" in str(col).lower() or df[col].astype(str).str.contains(r'P\d+', na=False).any():
+        if "نقطه" in str(col).lower() or "point" in str(col).lower() or df[col].astype(str).str.contains(r'P\d+', na=False).any():
             point_col = col
             break
     if point_col and selected_point != "همه":
-        # فیلتر کردن بر اساس مقدار نقطه (مثلاً P2)
-        filtered_df = filtered_df[filtered_df[point_col].str.upper() == selected_point.upper()]
-    if col_date and selected_date != "همه تاریخ‌ها": filtered_df = filtered_df[filtered_df[col_date] == selected_date]
+        # فیلتر کردن با دقت بالا روی نقطه
+        p_target = selected_point.upper()
+        filtered_df = filtered_df[filtered_df[point_col].astype(str).str.upper() == p_target]
+    if col_date and selected_date != "همه تاریخ‌ها": 
+        filtered_df = filtered_df[filtered_df[col_date] == selected_date]
     # ==============================================================================
     # 6. نمایش مشخصات فنی و جداول
     # ==============================================================================
     if not filtered_df.empty:
+        # حالا چون title_col را ffill کردیم، eq_name_val برای تمام ردیف‌ها درست است
         eq_name_val = filtered_df[col_title].iloc[0] if col_title else "نامشخص"
         asset_row = None
         if df_assets is not None:
@@ -151,7 +169,6 @@ if df is not None:
                 if not match.empty:
                     asset_row = match.iloc[0]
                 else:
-                    # جستجوی تقریبی اگر نام دقیق پیدا نشد
                     parts = eq_name_val.split()
                     if len(parts) > 0:
                         fuzzy_match = df_assets[df_assets[asset_name_col].str.contains(parts[0], na=False)]
@@ -175,11 +192,11 @@ if df is not None:
                     <span><b style="color: #1E3A8D;">🔹 نوع:</b> {eq_type}</span>
                     <span><b style="color: #1E3A8D;">🔹 دور:</b> {rpm} RPM</span>
                     <span><b style="color: #1E3A8D;">🔹 واحد:</b> {unit_val}</span>
-                </div>
+                </div >
                 <div style="margin-top: 12px; font-size: 15px; color: #1E3A8D; background: #e6efff; padding: 8px 15px; border-radius: 8px; display: inline-block;">
                     <b style="color: #1E3A8D;">📍 راهنمای نقاط (P-Map):</b> {get_point_guide(eq_name_val, eq_type)}
-                </div>
-            </div>
+                </div >
+            </div >
             """, unsafe_allow_html=True)
             with st.expander("📦 اطلاعات لجستیکی و قطعات (بیرینگ و بوش)", expanded=True):
                 c1, c2 = st.columns(2)
@@ -204,7 +221,8 @@ if df is not None:
                 st.metric("جمع کل هزینه‌ها", f"{total_cost:,.0f} تومان")
             except: st.metric("جمع کل هزینه‌ها", "نامشخص")
         st.markdown("### 📋 جدول جزئیات پایش و مقایسه")
-        vib_cols = [col for col in filtered_df.columns if any(name in str(col) for name in ["افقی", "عمودی", "محوری", "mm/s"])]
+        # در اینجا نمایش ستون نقطه را حتماً اضافه می‌کنیم
+        display_cols = [col for col in filtered_df.columns if any(name in str(col) for name in ["افقی", "عمودی", "محوری", "mm/s", "نقطه", "point", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10", "p11"])]
         def color_vibration(val):
             try:
                 num = float(str(val).replace(",", ".").replace("٫", "."))
@@ -212,8 +230,8 @@ if df is not None:
                 if num > 4.7: return 'background-color: #fff2b2; color: #856404; font-weight: bold'
                 return 'background-color: #e6ffed; color: #2e7d32'
             except: return ''
-        if vib_cols:
-            st.dataframe(filtered_df.style.map(color_vibration, subset=vib_cols), width='stretch', hide_index=True)
+        if display_cols:
+            st.dataframe(filtered_df.style.map(color_vibration, subset=display_cols), width='stretch', hide_index=True)
         else:
             st.dataframe(filtered_df, width='stretch', hide_index=True)
     else:
