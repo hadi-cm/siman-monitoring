@@ -1,7 +1,6 @@
 import pandas as pd
 import streamlit as st
 import base64
-
 # ==============================================================================
 # 1. تنظیمات امنیتی و دسترسی
 # ==============================================================================
@@ -34,7 +33,6 @@ def check_password():
 
 if not check_password():
     st.stop()
-
 # ==============================================================================
 # 2. پیکربندی صفحه و استایل‌ها
 # ==============================================================================
@@ -56,7 +54,6 @@ st.markdown(f"""
         <img src="data:image/png;base64,{logo_siman_base64}" style="width: 110px; height: auto;">
     </div >
     """, unsafe_allow_html=True)
-
 # ==============================================================================
 # 3. مدیریت داده‌ها (اصلاح هوشمند برای ساختار شیت شما)
 # ==============================================================================
@@ -161,45 +158,48 @@ if df is not None:
     if not filtered_df.empty:
         # حالا چون title_col را ffill کردیم، eq_name_val برای تمام ردیف‌ها درست است
         eq_name_val = filtered_df[col_title].iloc[0] if col_title else "نامشخص"
-        asset_row = None
         if df_assets is not None:
-            asset_name_col = next((c for c in df_assets.columns if "نام" in c or "تجهیز" in c), None)
-            if asset_name_col:
-                match = df_assets[df_assets[asset_name_col] == eq_name_val]
-                if not match.empty:
-                    asset_row = match.iloc[0]
-                else:
-                    parts = eq_name_val.split()
-                    if len(parts) > 0:
-                        fuzzy_match = df_assets[df_assets[asset_name_col].str.contains(parts[0], na=False)]
-                        if not fuzzy_match.empty: asset_row = fuzzy_match.iloc[0]
-        if asset_row is not None:
-            def get_safe_val(keyword):
-                col = next((c for c in df_assets.columns if keyword in c), None)
-                if col:
-                    v = str(asset_row[col]).strip()
-                    return v if v.lower() not in ['nan', 'none', ''] else "---"
-                return "نامشخص"
-            eq_type = get_safe_val("نوع")
-            bearing = get_safe_val("بیرینگ")
-            bush = get_safe_val("بوش")
-            rpm = get_safe_val("دور")
-            unit_val = get_safe_val("واحد")
-            st.markdown(f"""
-            <div style="background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-right: 10px solid #1E3A8D; margin-bottom: 15px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05);">
-                <h3 style="color: #1E3A8D; margin-top: 0; font-family: 'Tahoma';">🛠️ مشخصات فنی تجهیز: {eq_name_val}</h3>
-                <div style="display: flex; justify-content: space-between; font-size: 16px; color: #333; flex-wrap: wrap; gap: 10px;">
-                    <span><b style="color: #1E3A8D;">🔹 نوع:</b> {eq_type}</span>
-                    <span><b style="color: #1E3A8D;">🔹 دور:</b> {rpm} RPM</span>
-                    <span><b style="color: #1E3A8D;">🔹 واحد:</b> {unit_val}</span>
-                </div >
-                <div style="margin-top: 12px; font-size: 15px; color: #1E3A8D; background: #e6efff; padding: 8px 15px; border-radius: 8px; display: inline-block;">
-                    <b style="color: #1E3A8D;">📍 راهنمای نقاط (P-Map):</b> {get_point_guide(eq_name_val, eq_type)}
-                </div >
-            </div >
-            """, unsafe_allow_html=True)
-            with st.expander("📦 اطلاعات لجستیکی و قطعات (بیرینگ و بوش)", expanded=True):
-                c1, c2 = st.columns(2)
+            # پیدا کردن ستون‌ها به صورت هوشمند
+            asset_name_col = next((c for c in df_assets.columns if "نام" in c or "تجهیز" in c), df_assets.columns[0])
+            asset_point_col = next((c for c in df_assets.columns if "نقطه" in c or "point" in c), df_assets.columns[4])
+            bearing_col = next((c for c in df_assets.columns if "بیرینگ" in c), df_assets.columns[5])
+            bush_col = next((c for c in df_assets.columns if "بوش" in c), df_assets.columns[6])
+            # پیدا کردن تمام ردیف‌های مربوط به این تجهیز
+            asset_rows = df_assets[df_assets[asset_name_col].str.strip() == eq_name_val].copy()
+            if not asset_rows.empty:
+                # استخراج اطلاعات کلی برای کارت بالای صفحه از اولین ردیف موجود
+                first_row = asset_rows.iloc[0]
+                def get_safe_val(keyword):
+                    col = next((c for c in df_assets.columns if keyword in c), None)
+                    if col:
+                        v = str(first_row[col]).strip()
+                        return v if v.lower() not in ['nan', 'none', ''] else "---"
+                    return "---"
+                eq_type = get_safe_val("نوع")
+                rpm = get_safe_val("دور")
+                unit_val = get_safe_val("واحد")
+                # نمایش کارت مشخصات فنی
+                st.markdown(f"""
+                <div style="background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-right: 10px solid #1E3A8D; margin-bottom: 15px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05);">
+                    <h3 style="color: #1E3A8D; margin-top: 0; font-family: 'Tahoma';">🛠️ مشخصات فنی تجهیز: {eq_name_val}</h3>
+                    <div style="display: flex; justify-content: space-between; font-size: 16px; color: #333; flex-wrap: wrap; gap: 10px;">
+                        <span><b style="color: #1E3A8D;">🔹 نوع:</b> {eq_type}</span>
+                        <span><b style="color: #1E3A8D;">🔹 دور:</b> {rpm} RPM</span>
+                        <span><b style="color: #1E3A8D;">🔹 واحد:</b> {unit_val}</span>
+                    </div>
+                    <div style="margin-top: 12px; font-size: 15px; color: #1E3A8D; background: #e6efff; padding: 8px 15px; border-radius: 8px; display: inline-block;">
+                        <b style="color: #1E3A8D;">📍 راهنمای نقاط (P-Map):</b> {get_point_guide(eq_name_val, eq_type)}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                # نمایش جدول بیرینگ و بوش برای تمام نقاط این تجهیز
+                logistics = asset_rows[[asset_point_col, bearing_col, bush_col]].copy()
+                logistics.columns = ["نقطه", "شماره بیرینگ", "شماره بوش"]
+                logistics = logistics.replace("nan", "---").fillna("---")
+                with st.expander("📦 اطلاعات لجستیکی و قطعات (به تفکیک هر نقطه)", expanded=True):
+                    st.dataframe(logistics, hide_index=True, use_container_width=True)
+            else:
+                st.warning(f"⚠️ مشخصات فنی برای تجهیز '{eq_name_val}' در شیت Assets یافت نشد."
                 with c1: st.markdown(f"**🛢️ شماره بیرینگ:*\n`{bearing}`")
                 with c2: st.markdown(f"⚙️ شماره بوش:*\n`{bush}`")
         else:
