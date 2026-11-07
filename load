@@ -64,9 +64,11 @@ VIB_URL = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EI
 ASSETS_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTI4vONsowudctVbskGkkSyQNqkkGZ8AuiykO9UKeE-8FSBZemWkR4q5DSAhpXEqwQkgsCUQy44Vvqx/pub?gid=1276803564&single=true&output=csv"
 
 @st.cache_data(ttl=60)
+@st.cache_data(ttl=60)
 def load_all_data():
     duplicates_found = []
     try:
+        # 1. بارگذاری داده‌های ارتعاشات
         df_vib = pd.read_csv(VIB_URL)
         df_vib.columns = df_vib.columns.str.strip()
 
@@ -74,25 +76,16 @@ def load_all_data():
         if title_col:
             df_vib[title_col] = df_vib[title_col].replace(r'^\s$', pd.NA, regex=True).ffill()
         df_vib = df_vib.astype(str).apply(lambda x: x.str.strip())
-        try:
-            df_assets = pd.read_csv(ASSETS_URL)
-            df_assets.columns = df_assets.columns.str.strip()
-            asset_name_col = next((c for c in df_assets.columns if "نام" in c or "تجهیز" in c), None)
-            if asset_name_col:
-                # تشخیص تکراری بر اساس ترکیب ستون A, B و نام
-                cols_to_check = [df_assets.columns[0], df_assets.columns[1], asset_name_col]
-                duplicate_mask = df_assets.duplicated(subset=cols_to_check, keep=False)
-                duplicates = df_assets[duplicate_mask][asset_name_col].unique().tolist()
-                if duplicates:
-                    duplicates_found = duplicates
+        # 2. بارگذاری داده‌های Assets (تجهیزات)        try:            df_assets = pd.read_csv(ASSETS_URL)            df_assets.columns = df_assets.columns.str.strip()
+            # --- بخش اصلاح شده برای تشخیص تکراری‌ها (بر اساس نام + نقطه) ---            # ستون A (نام تجهیز) و ستون E (نقطه) را شناسایی می‌کنیم            name_col = df_assets.columns[0]             point_col = df_assets.columns[4]
+            names = df_assets[name_col].fillna("").astype(str).str.strip()            points = df_assets[point_col].fillna("").astype(str).str.strip().str.upper()
+            # فقط ردیف‌هایی که هم نام دارند و هم نقطه را بررسی می‌کنیم (برای جلوگیری از خطای nan)            valid_mask = (names.ne("") & names.str.lower().ne("nan")) & \                         (points.ne("") & points.str.lower().ne("nan"))
+            # پیدا کردن ردیف‌هایی که ترکیب (نام + نقطه) آن‌ها تکراری است            duplicate_mask = (                valid_mask &                 df_assets.assign(_name=names, _point=points)                         .duplicated(subset=["_name", "_point"], keep=False)            )
+            if duplicate_mask.any():                # ساخت لیست تکراری‌ها برای نمایش در هشدار                dups = df_assets[duplicate_mask].apply(                    lambda x: f"{x[name_col]} ({x[point_col]})", axis=1                )                duplicates_found = sorted(list(set(dups.astype(str))))
             df_assets = df_assets.astype(str).apply(lambda x: x.str.strip())
-        except:
-            df_assets = None
+        except Exception as asset_e:            st.warning(f"⚠️ هشدار در بارگذاری Assets: {asset_e}")            df_assets = None
         return df_vib, df_assets, duplicates_found
-    except Exception as e:
-        st.error(f"❌ خطا در دریافت داده‌ها: {e}")
-        return None, None, []
-df, df_assets, duplicates = load_all_data()
+    except Exception as e:        st.error(f"❌ خطا در دریافت داده‌ها: {e}")        return None, None, []
 if duplicates:
         # این نسخه فقط زمانی هشدار می‌دهد که ترکیب نام و نقطه واقعاً تکراری باشد
         # اگر باز هم هشدار داد، یعنی واقعاً در شیت ردیف‌های کاملاً یکسان دارید.
