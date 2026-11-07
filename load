@@ -58,17 +58,15 @@ st.markdown(f"""
     """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 3. مدیریت داده‌ها (اصلاح شده برای شناسایی هوشمند نقاط و تکراری‌ها)
+# 3. مدیریت داده‌ها (اصلاح شده برای نام تجهیزات عددی و نقاط)
 # ==============================================================================
 VIB_URL = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=0"
 ASSETS_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTI4vONsowudctVbskGkkSyQNqkkGZ8AuiykO9UKeE-8FSBZemWkR4q5DSAhpXEqwQkgsCUQy44Vvqx/pub?gid=1276803564&single=true&output=csv"
 
 @st.cache_data(ttl=60)
-@st.cache_data(ttl=60)
 def load_all_data():
     duplicates_found = []
     try:
-        # 1. بارگذاری داده‌های ارتعاشات
         df_vib = pd.read_csv(VIB_URL)
         df_vib.columns = df_vib.columns.str.strip()
 
@@ -76,21 +74,33 @@ def load_all_data():
         if title_col:
             df_vib[title_col] = df_vib[title_col].replace(r'^\s$', pd.NA, regex=True).ffill()
         df_vib = df_vib.astype(str).apply(lambda x: x.str.strip())
-        # 2. بارگذاری داده‌های Assets (تجهیزات)        try:            df_assets = pd.read_csv(ASSETS_URL)            df_assets.columns = df_assets.columns.str.strip()
-            # --- بخش اصلاح شده برای تشخیص تکراری‌ها (بر اساس نام + نقطه) ---            # ستون A (نام تجهیز) و ستون E (نقطه) را شناسایی می‌کنیم            name_col = df_assets.columns[0]             point_col = df_assets.columns[4]
-            names = df_assets[name_col].fillna("").astype(str).str.strip()            points = df_assets[point_col].fillna("").astype(str).str.strip().str.upper()
-            # فقط ردیف‌هایی که هم نام دارند و هم نقطه را بررسی می‌کنیم (برای جلوگیری از خطای nan)            valid_mask = (names.ne("") & names.str.lower().ne("nan")) & \                         (points.ne("") & points.str.lower().ne("nan"))
-            # پیدا کردن ردیف‌هایی که ترکیب (نام + نقطه) آن‌ها تکراری است            duplicate_mask = (                valid_mask &                 df_assets.assign(_name=names, _point=points)                         .duplicated(subset=["_name", "_point"], keep=False)            )
-            if duplicate_mask.any():                # ساخت لیست تکراری‌ها برای نمایش در هشدار                dups = df_assets[duplicate_mask].apply(                    lambda x: f"{x[name_col]} ({x[point_col]})", axis=1                )                duplicates_found = sorted(list(set(dups.astype(str))))
+        try:
+            df_assets = pd.read_csv(ASSETS_URL)
+            df_assets.columns = df_assets.columns.str.strip()
+            # شناسایی ستون‌ها بر اساس موقعیت (A=0, E=4) برای اطمینان کامل
+            name_col = df_assets.columns[0]
+            point_col = df_assets.columns[4] if len(df_assets.columns) > 4 else None
+            if point_col:
+                names = df_assets[name_col].fillna("").astype(str).str.strip()
+                points = df_assets[point_col].fillna("").astype(str).str.strip().str.upper()
+                valid_mask = (names.ne("") & names.str.lower().ne("nan")) & (points.ne("") & points.str.lower().ne("nan"))
+                duplicate_mask = (
+                    valid_mask & 
+                    df_assets.assign(_name=names, _point=points).duplicated(subset=["_name", "_point"], keep=False)
+                )
+                if duplicate_mask.any():
+                    dups = df_assets[duplicate_mask].apply(lambda x: f"{x[name_col]} ({x[point_col]})", axis=1)
+                    duplicates_found = sorted(list(set(dups.astype(str))))
             df_assets = df_assets.astype(str).apply(lambda x: x.str.strip())
-        except Exception as asset_e:            st.warning(f"⚠️ هشدار در بارگذاری Assets: {asset_e}")            df_assets = None
+        except:
+            df_assets = None
         return df_vib, df_assets, duplicates_found
-    except Exception as e:        st.error(f"❌ خطا در دریافت داده‌ها: {e}")        return None, None, []
+    except Exception as e:
+        st.error(f"❌ خطا در دریافت داده‌ها: {e}")
+        return None, None, []
+df, df_assets, duplicates = load_all_data()
 if duplicates:
-        # این نسخه فقط زمانی هشدار می‌دهد که ترکیب نام و نقطه واقعاً تکراری باشد
-        # اگر باز هم هشدار داد، یعنی واقعاً در شیت ردیف‌های کاملاً یکسان دارید.
-        error_msg = ", ".join([str(d) for d in duplicates])
-        st.error(f"⚠️ هشدار: در شیت Assets، موارد زیر بیش از یک بار تعریف شده‌اند: {error_msg}")
+    st.error(f"⚠️ هشدار: موارد زیر (تجهیز و نقطه) در شیت Assets تکراری هستند: {', '.join(duplicates)}")
 # ==============================================================================
 # 4. راهنمای نقاط
 # ==============================================================================
@@ -149,16 +159,13 @@ if df is not None:
         p_target = selected_point.upper()
         filtered_df = filtered_df[filtered_df[point_col].astype(str).str.upper() == p_target]
     if col_date and selected_date != "همه تاریخ‌ها": filtered_df = filtered_df[filtered_df[col_date] == selected_date]
-    # ==============================================================================
-    # 6. نمایش مشخصات فنی و جداول
-    # ==============================================================================
     if not filtered_df.empty:
         eq_name_val = filtered_df[col_title].iloc[0] if col_title else "نامشخص"
         if df_assets is not None:
             asset_name_col = next((c for c in df_assets.columns if "نام" in c or "تجهیز" in c), df_assets.columns[0])
-            asset_point_col = next((c for c in df_assets.columns if "نقطه" in c or "point" in c), df_assets.columns[4])
-            bearing_col = next((c for c in df_assets.columns if "بیرینگ" in c), df_assets.columns[5])
-            bush_col = next((c for c in df_assets.columns if "بوش" in c), df_assets.columns[6])
+            asset_point_col = next((c for c in df_assets.columns if "نقطه" in c or "point" in c), df_assets.columns[4] if len(df_assets.columns)>4 else df_assets.columns[0])
+            bearing_col = next((c for c in df_assets.columns if "بیرینگ" in c), df_assets.columns[5] if len(df_assets.columns)>5 else df_assets.columns[0])
+            bush_col = next((c for c in df_assets.columns if "بوش" in c), df_assets.columns[6] if len(df_assets.columns)>6 else df_assets.columns[0])
             asset_rows = df_assets[df_assets[asset_name_col].str.strip() == eq_name_val].copy()
             if not asset_rows.empty:
                 first_row = asset_rows.iloc[0]
