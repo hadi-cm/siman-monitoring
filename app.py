@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 import base64
 # ==============================================================================
-# 0. تنظیمات صفحه (باید اولین دستور Streamlit باشد)
+# 0. تنظیمات صفحه
 # ==============================================================================
 st.set_page_config(page_title="داشبورد فنی ارتعاشات سیمان تهران", layout="wide")
 # ==============================================================================
@@ -36,13 +36,11 @@ def check_password():
 if not check_password():
     st.stop()
 # ==============================================================================
-# 2. توابع کمکی (برای حل مشکل یافت نشدن تجهیزات و اعداد فارسی)
+# 2. توابع کمکی (برای حل مشکل یافت نشدن تجهیزات)
 # ==============================================================================
 def clean_text(text):
-    """حذف فاصله‌های اضافی و تبدیل اعداد فارسی/عربی به انگلیسی برای مقایسه دقیق"""
     if pd.isna(text): return ""
     text = str(text).strip()
-    # تبدیل اعداد
     farsi_nums = "۰۱۲۳۴۵۶۷۸۹"
     arabic_nums = "٠١٢٣٤٥٦٧٨٩"
     english_nums = "0123456789"
@@ -89,6 +87,7 @@ def load_all_data():
         st.error(f"❌ خطا در دریافت داده‌ها: {e}")
         return None, None
 df, df_assets = load_all_data()
+``python
 # ==============================================================================
 # 5. راهنمای نقاط
 # ==============================================================================
@@ -123,24 +122,24 @@ if df is not None:
     if col_date and selected_date != "همه تاریخ‌ها": filtered_df = filtered_df[filtered_df[col_date] == selected_date]
     if not filtered_df.empty:
         eq_name_val = filtered_df[col_title].iloc[0] if col_title else ""
-        # ---------- بخش مشخصات فنی (جستجوی هوشمند) ----------
         if df_assets is not None:
             asset_name_col = next((c for c in df_assets.columns if "نام" in c or "تجهیز" in c), df_assets.columns[0])
-            # استفاده از clean_text برای هر دو طرف مقایسه
             asset_rows = df_assets[df_assets[asset_name_col].apply(clean_text) == clean_text(eq_name_val)].copy()
             if not asset_rows.empty:
                 first_row = asset_rows.iloc[0]
                 def get_val(k):
                     c = next((c for c in df_assets.columns if k in c), None)
-                    return str(first_row[c]).strip() if c and str(first_row[c]).strip().lower() != 'nan' else "---"
+                    return str(first_row[c]).strip() if c and str(first_row[c]).strip().lower() not in ['nan', 'none', ''] else "---"
                 eq_type = get_val("نوع")
                 st.markdown(f"""
                 <div style="background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-right: 10px solid #1E3A8D; margin-bottom: 15px;">
                     <h3 style="color: #1E3A8D; margin-top: 0;">🛠️ مشخصات فنی: {eq_name_val}</h3>
                     <div style="display: flex; gap: 20px; font-size: 16px;">
-                        <span><b>🔹 نوع:</b> {eq_type}</span> | <span><b>🔹 دور:</b> {get_val("دور")} RPM</span> | <span><b>🔹 واحد:</b> {get_val("واحد")}</span>
+                        <span><b style="color: #1E3A8D;">🔹 نوع:</b> {eq_type}</span> | <span><b style="color: #1E3A8D;">🔹 دور:</b> {get_val("دور")} RPM</span> | <span><b style="color: #1E3A8D;">🔹 واحد:</b> {get_val("واحد")}</span>
                     </div>
-                    <div style="margin-top: 10px; color: #1E3A8D;"><b style="color: #1E3A8D;">📍 راهنمای نقاط:</b> {get_point_guide(eq_name_val, eq_type)}</div>
+                    <div style="margin-top: 12px; font-size: 15px; color: #1E3A8D; background: #e6efff; padding: 8px 15px; border-radius: 8px; display: inline-block;">
+                        <b style="color: #1E3A8D;">📍 راهنمای نقاط:</b> {get_point_guide(eq_name_val, eq_type)}
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
                 pts = next((c for c in df_assets.columns if "نقطه" in c), df_assets.columns[4] if len(df_assets.columns)>4 else df_assets.columns[0])
@@ -150,7 +149,6 @@ if df is not None:
                 st.dataframe(asset_rows[cols].rename(columns={pts:"نقطه", brg:"بیرینگ", bsh:"بوش"}), hide_index=True, use_container_width=True)
             else:
                 st.warning(f"⚠️ مشخصات فنی برای تجهیز '{eq_name_val}' در شیت Assets یافت نشد. لطفاً نام را در هر دو شیت یکسان کنید.")
-        # ---------- متریک‌ها ----------
         m1, m2, m3 = st.columns(3)
         with m1: st.metric("تعداد رکوردها", len(filtered_df))
         with m2: 
@@ -160,7 +158,6 @@ if df is not None:
             cost_col = next((c for c in filtered_df.columns if "هزینه" in c), None)
             cost = pd.to_numeric(filtered_df[cost_col].str.replace(r'[^\d.]', '', regex=True), errors='coerce').sum() if cost_col else 0
             st.metric("جمع هزینه‌ها", f"{cost:,.0f} تومان")
-        # ---------- جدول جزئیات (نمایش تمام تاریخ‌ها و ستون‌ها) ----------
         st.markdown("### 📋 جزئیات پایش و مقایسه (تمام سوابق)")
         def color_v(val):
             try:
@@ -175,4 +172,4 @@ if df is not None:
         st.info("🔎 داده‌ای با این مشخصات یافت نشد.")
     st.markdown('<div style="text-align:center; margin-top:20px; font-weight:bold;">طراحی و توسعه: مهندس هادی زندیه | شرکت فاز فیدار پارسیان</div>', unsafe_allow_html=True)
 else:
-    st.error("❌ خطا در دریافت داده‌ها. لطفاً اتصال اینترنت و لینک گوگل‌شیت را بررسی کنید."
+    st.error("❌ خطا در دریافت داده‌ها. لطفاً اتصال اینترنت و لینک گوگل‌شیت را بررسی کنید.")
