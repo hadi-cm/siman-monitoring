@@ -106,29 +106,52 @@ if df is not None:
     col_title = next((c for c in df.columns if "عنوان تجهیز" in c or "نام تجهیز" in c), None)
     col_date = next((c for c in df.columns if "تاریخ" in c), None)
     point_col = next((c for c in df.columns if "نقطه" in str(c).lower() or "point" in str(c).lower()), None)
+
     with st.expander("🔍 سیستم جستجو و فیلتر پیشرفته", expanded=True):
         f1, f2, f3, f4, f5 = st.columns(5)
-        with f1: selected_line = st.selectbox("📍 خط تولید:", ["همه"] + sorted(df[col_line].unique().tolist()) if col_line else ["همه"])
-        with f2: selected_unit = st.selectbox("🏢 واحد:", ["همه"] + sorted(df[col_unit].unique().tolist()) if col_unit else ["همه"])
+        
+        with f1: 
+            if col_line:
+                # تبدیل تمام مقادیر به رشته برای جلوگیری از TypeError در هنگام sorted
+                all_lines = sorted([str(v) for v in df[col_line].unique() if pd.notna(v)])
+                selected_line = st.selectbox("📍 خط تولید:", ["همه"] + all_lines)
+            else: selected_line = "همه"
+            
+        with f2: 
+            if col_unit:
+                all_units = sorted([str(v) for v in df[col_unit].unique() if pd.notna(v)])
+                selected_unit = st.selectbox("🏢 واحد:", ["همه"] + all_units)
+            else: selected_unit = "همه"
+            
         with f3: search_eq = st.text_input("🔍 نام تجهیز:", "")
         with f4: selected_point = st.selectbox("📍 نقطه:", ["همه"] + [f"P{i}" for i in range(1, 13)])
-        with f5: selected_date = st.selectbox("📅 تاریخ:", ["همه تاریخ‌ها"] + sorted(df[col_date].unique().tolist(), reverse=True) if col_date else ["همه تاریخ‌ها"])
+        
+        with f5: 
+            if col_date:
+                all_dates = sorted([str(v) for v in df[col_date].unique() if pd.notna(v)], reverse=True)
+                selected_date = st.selectbox("📅 تاریخ:", ["همه تاریخ‌ها"] + all_dates)
+            else: selected_date = "همه تاریخ‌ها"
+
     filtered_df = df.copy()
-    if col_line and selected_line != "همه": filtered_df = filtered_df[filtered_df[col_line] == selected_line]
-    if col_unit and selected_unit != "همه": filtered_df = filtered_df[filtered_df[col_unit] == selected_unit]
+    if col_line and selected_line != "همه": filtered_df = filtered_df[filtered_df[col_line].astype(str) == selected_line]
+    if col_unit and selected_unit != "همه": filtered_df = filtered_df[filtered_df[col_unit].astype(str) == selected_unit]
     if col_title and search_eq: filtered_df = filtered_df[filtered_df[col_title].str.contains(search_eq, case=False, na=False)]
     if point_col and selected_point != "همه": filtered_df = filtered_df[filtered_df[point_col].astype(str).str.upper() == selected_point.upper()]
-    if col_date and selected_date != "همه تاریخ‌ها": filtered_df = filtered_df[filtered_df[col_date] == selected_date]
+    if col_date and selected_date != "همه تاریخ‌ها": filtered_df = filtered_df[filtered_df[col_date].astype(str) == selected_date]
+
     if not filtered_df.empty:
         eq_name_val = filtered_df[col_title].iloc[0] if col_title else ""
+        
         if df_assets is not None:
             asset_name_col = next((c for c in df_assets.columns if "نام" in c or "تجهیز" in c), df_assets.columns[0])
             asset_rows = df_assets[df_assets[asset_name_col].apply(clean_text) == clean_text(eq_name_val)].copy()
+
             if not asset_rows.empty:
                 first_row = asset_rows.iloc[0]
                 def get_val(k):
                     c = next((c for c in df_assets.columns if k in c), None)
                     return str(first_row[c]).strip() if c and str(first_row[c]).strip().lower() not in ['nan', 'none', ''] else "---"
+                
                 eq_type = get_val("نوع")
                 st.markdown(f"""
                 <div style="background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-right: 10px solid #1E3A8D; margin-bottom: 15px;">
@@ -141,13 +164,15 @@ if df is not None:
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
+                
                 pts = next((c for c in df_assets.columns if "نقطه" in c), df_assets.columns[4] if len(df_assets.columns)>4 else df_assets.columns[0])
                 brg = next((c for c in df_assets.columns if "بیرینگ" in c), None)
                 bsh = next((c for c in df_assets.columns if "بوش" in c), None)
                 cols = [pts] + ([brg] if brg else []) + ([bsh] if bsh else [])
                 st.dataframe(asset_rows[cols].rename(columns={pts:"نقطه", brg:"بیرینگ", bsh:"بوش"}), hide_index=True, use_container_width=True)
             else:
-                st.warning(f"⚠️ مشخصات فنی برای تجهیز '{eq_name_val}' در شیت Assets یافت نشد. لطفاً نام را در هر دو شیت یکسان کنید.")
+                st.warning(f"⚠️ مشخصات فنی برای تجهیز '{eq_name_val}' در شیت Assets یافت نشد.")
+
         m1, m2, m3 = st.columns(3)
         with m1: st.metric("تعداد رکوردها", len(filtered_df))
         with m2: 
@@ -157,6 +182,7 @@ if df is not None:
             cost_col = next((c for c in filtered_df.columns if "هزینه" in c), None)
             cost = pd.to_numeric(filtered_df[cost_col].str.replace(r'[^\d.]', '', regex=True), errors='coerce').sum() if cost_col else 0
             st.metric("جمع هزینه‌ها", f"{cost:,.0f} تومان")
+
         st.markdown("### 📋 جزئیات پایش و مقایسه (تمام سوابق)")
         def color_v(val):
             try:
@@ -165,10 +191,12 @@ if df is not None:
                 if n > 4.7: return 'background-color: #fff2b2; color: #856404; font-weight: bold'
                 return 'background-color: #e6ffed; color: #2e7d32'
             except: return ''
+        
         vib_cols = [c for c in filtered_df.columns if any(k in c for k in ["افقی", "عمودی", "محوری", "mm/s"])]
         st.dataframe(filtered_df.style.map(color_v, subset=vib_cols), use_container_width=True, hide_index=True)
     else:
         st.info("🔎 داده‌ای با این مشخصات یافت نشد.")
+
     st.markdown('<div style="text-align:center; margin-top:20px; font-weight:bold;">طراحی و توسعه: مهندس هادی زندیه | شرکت فاز فیدار پارسیان</div>', unsafe_allow_html=True)
 else:
-    st.error("❌ خطا در دریافت داده‌ها. لطفاً اتصال اینترنت و لینک گوگل‌شیت را بررسی کنید.")
+    st.error("❌ خطا در دریافت داده‌ها. لطفاً اتصال اینترنت و لینک گوگل‌شیت را بررسی کنید
