@@ -36,10 +36,9 @@ def check_password():
 if not check_password():
     st.stop()
 # ==============================================================================
-# 2. توابع کمکی (بسیار حیاتی برای حل مشکل یافت نشدن)
+# 2. توابع کمکی
 # ==============================================================================
 def clean_text(text):
-    """تبدیل اعداد و حذف فاصله‌ها برای مقایسه بدون خطا"""
     if pd.isna(text): return ""
     text = str(text).strip()
     farsi_nums = "۰۱۲۳۴۵۶۷۸۹"
@@ -74,7 +73,6 @@ def load_all_data():
     try:
         df_vib = pd.read_csv(VIB_URL)
         df_vib.columns = df_vib.columns.str.strip()
-        # پر کردن جاهای خالی در عنوان تجهیزات
         title_col = next((c for c in df_vib.columns if "عنوان تجهیز" in c or "نام تجهیز" in c), None)
         if title_col: df_vib[title_col] = df_vib[title_col].replace(r"^\s*$", pd.NA, regex=True).ffill()
         df_vib = df_vib.astype(str).apply(lambda x: x.str.strip())
@@ -127,7 +125,7 @@ if df is not None:
                 all_dates = sorted([str(v) for v in df[col_date].unique() if pd.notna(v)], reverse=True)
                 selected_date = st.selectbox("📅 تاریخ:", ["همه تاریخ‌ها"] + all_dates)
             else: selected_date = "همه تاریخ‌ها"
-    # --- فیلترینگ هوشمند برای جلوگیری از خطای "یافت نشد" ---
+    # فیلتر کردن داده‌ها (بدون محدود کردن تعداد ردیف‌ها)
     filtered_df = df.copy()
     if col_line and selected_line != "همه":
         filtered_df = filtered_df[filtered_df[col_line].apply(clean_text) == clean_text(selected_line)]
@@ -143,7 +141,9 @@ if df is not None:
         eq_name_val = filtered_df[col_title].iloc[0] if col_title else ""
         if df_assets is not None:
             asset_name_col = next((c for c in df_assets.columns if "نام" in c or "تجهیز" in c), df_assets.columns[0])
-            asset_rows = df_assets[df_assets[asset_name_col].apply(clean_text) == clean_text(eq_name_val)].copy()
+            # جستجوی منعطف: اگر نام تجهیز ارتعاشات شامل نام تجهیز Assets باشد یا برعکس
+            target_clean = clean_text(eq_name_val)
+            asset_rows = df_assets[df_assets[asset_name_col].apply(lambda x: target_clean in clean_text(x) or clean_text(x) in target_clean)].copy()
             if not asset_rows.empty:
                 first_row = asset_rows.iloc[0]
                 def get_val(k):
