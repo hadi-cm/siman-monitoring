@@ -36,7 +36,7 @@ def check_password():
 if not check_password():
     st.stop()
 # ==============================================================================
-# 2. توابع کمکی (بدون تابع find_col برای جلوگیری از تداخل)
+# 2. توابع کمکی
 # ==============================================================================
 def clean_text(text):
     if pd.isna(text): return ''
@@ -51,7 +51,6 @@ def get_image_base64(path):
     try:
         with open(path, 'rb') as image_file: return base64.b64encode(image_file.read()).decode()
     except: return ''
-# تابع جایگزین که مستقیماً در بدنه استفاده می‌شود
 def smart_find_column(columns, keywords):
     if columns is None: return None
     for k in keywords:
@@ -81,7 +80,6 @@ def load_all_data():
     try:
         df_vib = pd.read_csv(VIB_URL)
         df_vib.columns = df_vib.columns.str.strip()
-        # استفاده از تابع جدید
         title_col = smart_find_column(df_vib.columns, ['عنوان تجهیز', 'نام تجهیز'])
         if title_col:
             df_vib[title_col] = df_vib[title_col].replace(r'^\s*$', pd.NA, regex=True).ffill()
@@ -90,8 +88,7 @@ def load_all_data():
             df_assets = pd.read_csv(ASSETS_URL)
             df_assets.columns = df_assets.columns.str.strip()
             df_assets = df_assets.astype(str).apply(lambda x: x.str.strip()).replace({'nan': '', 'None': ''})
-        except: 
-            df_assets = None
+        except: df_assets = None
         return df_vib, df_assets
     except Exception as e:
         st.error(f'❌ خطا در دریافت داده‌ها: {e}')
@@ -114,7 +111,6 @@ def get_point_guide(eq_name, eq_type):
 # 6. رابط کاربری و فیلترها
 # ==============================================================================
 if df is not None:
-    # استفاده از تابع جدید برای تمام ستون‌ها
     col_line = smart_find_column(df.columns, ['خط تولید', 'خط'])
     col_unit = smart_find_column(df.columns, ['واحد'])
     col_title = smart_find_column(df.columns, ['عنوان تجهیز', 'نام تجهیز'])
@@ -138,8 +134,10 @@ if df is not None:
         filtered_df = filtered_df[filtered_df[col_line].apply(clean_text) == clean_text(sel_line)]
     if col_unit and sel_unit != 'همه':
         filtered_df = filtered_df[filtered_df[col_unit].apply(clean_text) == clean_text(sel_unit)]
+    # --- اصلاح ۱: فیلترینگ منعطف برای نمایش تمام تاریخ‌های تجهیزات مشابه ---
     if col_title and search_eq:
-        filtered_df = filtered_df[filtered_df[col_title].str.contains(search_eq, case=False, na=False)]
+        search_clean = clean_text(search_eq)
+        filtered_df = filtered_df[filtered_df[col_title].apply(lambda x: search_clean in clean_text(x))]
     if point_col and selected_point != 'همه':
         filtered_df = filtered_df[filtered_df[point_col].astype(str).str.upper().str.strip() == selected_point.upper()]
     if col_date and sel_date != 'همه تاریخ‌ها':
@@ -173,20 +171,32 @@ if df is not None:
                         </div>
                     </div>
                     ''', unsafe_allow_html=True)
+                    # --- اصلاح ۲: نمایش فقط نقاطی که بیرینگ یا بوش دارند ---
                     pts = smart_find_column(df_assets.columns, ['نقطه'])
                     brg = smart_find_column(df_assets.columns, ['بیرینگ'])
                     bsh = smart_find_column(df_assets.columns, ['بوش'])
                     cols_to_show = [c for c in [pts, brg, bsh] if c is not None]
                     if cols_to_show:
                         logistics = asset_rows[cols_to_show].copy()
+                        logistics = logistics.replace(['nan', 'None', ''], '---').fillna('---')
+                        # فیلتر کردن نقاط خالی
+                        if brg and bsh:
+                            logistics = logistics[((logistics[brg] != '---') | (logistics[bsh] != '---'))]
+                        elif brg:
+                            logistics = logistics[logistics[brg] != '---']
+                        elif bsh:
+                            logistics = logistics[logistics[bsh] != '---']
                         rename_map = {}
                         if pts: rename_map[pts] = 'نقطه'
                         if brg: rename_map[brg] = 'شماره بیرینگ'
                         if bsh: rename_map[bsh] = 'شماره بوش'
-                        logistics = logistics.rename(columns=rename_map).replace(['nan', 'None', ''], '---').fillna('---')
-                        with st.expander('📦 اطلاعات لجستیکی و قطعات', expanded=True):
-                            st.dataframe(logistics, hide_index=True, use_container_width=True)
-        # متریک‌ها و جدول نهایی
+                        logistics = logistics.rename(columns=rename_map)
+                        if not logistics.empty:
+                            with st.expander('📦 اطلاعات لجستیکی و قطعات', expanded=True):
+                                st.dataframe(logistics, hide_index=True, use_container_width=True)
+                        else:
+                            st.info('ℹ️ این تجهیز دارای بیرینگ یا بوش تعریف شده در لیست Assets نیست.')
+        # متریک‌ها
         m1, m2, m3 = st.columns(3)
         with m1: st.metric('تعداد رکورد یافت شده', len(filtered_df))
         with m2:
