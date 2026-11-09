@@ -1,6 +1,8 @@
 import pandas as pd
 import streamlit as st
 import base64
+import plotly.graph_objects as go
+import plotly.express as px
 # ==============================================================================
 # 0. تنظیمات صفحه
 # ==============================================================================
@@ -94,9 +96,6 @@ def load_all_data():
         st.error(f'❌ خطا در دریافت داده‌ها: {e}')
         return None, None
 df, df_assets = load_all_data()
-# ==============================================================================
-# 5. راهنمای نقاط
-# ==============================================================================
 def get_point_guide(eq_name, eq_type):
     name = str(eq_name).lower()
     etype = str(eq_type).lower() if eq_type else ''
@@ -128,13 +127,11 @@ if df is not None:
             selected_point = st.selectbox('📍 نقطه:', ['همه'] + [f'P{i}' for i in range(1, 13)])
         with f5:
             sel_date = st.selectbox('📅 تاریخ:', ['همه تاریخ‌ها'] + sorted([str(v) for v in df[col_date].unique() if pd.notna(v)], reverse=True) if col_date else ['همه تاریخ‌ها'])
-    # فیلترینگ
     filtered_df = df.copy()
     if col_line and sel_line != 'همه':
         filtered_df = filtered_df[filtered_df[col_line].apply(clean_text) == clean_text(sel_line)]
     if col_unit and sel_unit != 'همه':
         filtered_df = filtered_df[filtered_df[col_unit].apply(clean_text) == clean_text(sel_unit)]
-    # --- اصلاح ۱: فیلترینگ منعطف برای نمایش تمام تاریخ‌های تجهیزات مشابه ---
     if col_title and search_eq:
         search_clean = clean_text(search_eq)
         filtered_df = filtered_df[filtered_df[col_title].apply(lambda x: search_clean in clean_text(x))]
@@ -171,7 +168,6 @@ if df is not None:
                         </div>
                     </div>
                     ''', unsafe_allow_html=True)
-                    # --- اصلاح ۲: نمایش فقط نقاطی که بیرینگ یا بوش دارند ---
                     pts = smart_find_column(df_assets.columns, ['نقطه'])
                     brg = smart_find_column(df_assets.columns, ['بیرینگ'])
                     bsh = smart_find_column(df_assets.columns, ['بوش'])
@@ -179,38 +175,82 @@ if df is not None:
                     if cols_to_show:
                         logistics = asset_rows[cols_to_show].copy()
                         logistics = logistics.replace(['nan', 'None', ''], '---').fillna('---')
-                        # فیلتر کردن نقاط خالی
-                        if brg and bsh:
-                            logistics = logistics[((logistics[brg] != '---') | (logistics[bsh] != '---'))]
-                        elif brg:
-                            logistics = logistics[logistics[brg] != '---']
-                        elif bsh:
-                            logistics = logistics[logistics[bsh] != '---']
-                        rename_map = {}
-                        if pts: rename_map[pts] = 'نقطه'
-                        if brg: rename_map[brg] = 'شماره بیرینگ'
-                        if bsh: rename_map[bsh] = 'شماره بوش'
+                        if brg and bsh: logistics = logistics[((logistics[brg] != '---') | (logistics[bsh] != '---'))]
+                        elif brg: logistics = logistics[logistics[brg] != '---']
+                        elif bsh: logistics = logistics[logistics[bsh] != '---']
+                        rename_map = {pts: 'نقطه', brg: 'شماره بیرینگ', bsh: 'شماره بوش'}
                         logistics = logistics.rename(columns=rename_map)
                         if not logistics.empty:
                             with st.expander('📦 اطلاعات لجستیکی و قطعات', expanded=True):
                                 st.dataframe(logistics, hide_index=True, use_container_width=True)
-                        else:
-                            st.info('ℹ️ این تجهیز دارای بیرینگ یا بوش تعریف شده در لیست Assets نیست.')
-        # متریک‌ها
-        m1, m2, m3 = st.columns(3)
-        with m1: st.metric('تعداد رکورد یافت شده', len(filtered_df))
-        with m2:
-            bal_col = smart_find_column(filtered_df.columns, ['بالانس'])
-            bal_count = len(filtered_df[filtered_df[bal_col].astype(str).str.strip() != '0']) if bal_col else 0
-            st.metric('تعداد بالانس شده', bal_count)
-        with m3:
-            cost_col = smart_find_column(filtered_df.columns, ['هزینه'])
-            total_cost = 0
-            if cost_col:
-                total_cost = pd.to_numeric(filtered_df[cost_col].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').sum()
-            st.metric('جمع کل هزینه‌ها', f'{total_cost:,.0f} تومان')
         st.markdown('### 📋 جدول جزئیات پایش')
         st.dataframe(filtered_df, use_container_width=True)
+        # ==============================================================================
+        # 7. بخش تحلیل‌های بصری و نمودارها
+        # ==============================================================================
+        st.markdown('---')
+        st.markdown('## 📈 تحلیل‌های بصری و روند ارتعاشات')
+        # پیدا کردن ستون‌های لرزش (افقی، عمودی، محوری)
+        vib_cols = [c for c in df.columns if any(k in str(c) for k in ['عمودی', 'افقی', 'محوری'])]
+        if vib_cols:
+            tab1, tab2, tab3 = st.tabs(['📉 روند تغییرات نقطه', '📊 مقایسه نقاط', '🍩 وضعیت کلی تجهیزات'])
+            with tab1:
+                st.markdown('#### تحلیل روند ارتعاشات در یک نقطه')
+                point_to_plot = st.selectbox('انتخاب نقطه برای تحلیل روند:', ['همه'] + [f'P{i}' for i in range(1, 13)])
+                if point_to_plot != 'همه':
+                    # فیلتر داده‌ها برای نقطه انتخابی و تجهیز انتخابی
+                    trend_df = df.copy()
+                    if col_title: trend_df = trend_df[trend_df[col_title] == eq_name_val]
+                    if point_col: trend_df = trend_df[trend_df[point_col].astype(str).str.upper().str.strip() == point_to_plot.upper()]
+                    if not trend_df.empty:
+                        # تبدیل تاریخ برای مرتب سازی (ساده شده)
+                        trend_df = trend_df.sort_values(by=col_date)
+                        fig_trend = go.Figure()
+                        for col in vib_cols:
+                            fig_trend.add_trace(go.Scatter(x=trend_df[col_date], y=pd.to_numeric(trend_df[col], errors='coerce'), 
+                                                         mode='lines+markers', name=col))
+                        fig_trend.update_layout(title=f'روند ارتعاشات {point_to_plot} - {eq_name_val}', 
+                                              xaxis_title='تاریخ', yaxis_title='مقدار (mm/s)', template='plotly_white')
+                        st.plotly_chart(fig_trend, use_container_width=True)
+                    else:
+                        st.info('داده‌ای برای این نقطه در تاریخ‌های مختلف یافت نشد.')
+                else:
+                    st.info('لطفاً یک نقطه (مثلاً P1) را انتخاب کنید تا روند تغییرات آن را ببینید.')
+            with tab2:
+                st.markdown('#### مقایسه لرزش نقاط در تاریخ انتخاب شده')
+                # استفاده از تاریخ انتخاب شده در فیلترهای بالا
+                compare_df = df.copy()
+                if col_title: compare_df = compare_df[compare_df[col_title] == eq_name_val]
+                if col_date and sel_date != 'همه تاریخ‌ها':
+                    compare_df = compare_df[compare_df[col_date].apply(clean_text) == clean_text(sel_date)]
+                if not compare_df.empty and point_col:
+                    # محاسبه میانگین لرزش در هر نقطه (از هر سه جهت)
+                    compare_df['Average_Vib'] = compare_df[vib_cols].apply(pd.to_numeric, errors='coerce').mean(axis=1)
+                    fig_bar = px.bar(compare_df, x=point_col, y='Average_Vib', 
+                                    title=f'مقایسه شدت لرزش نقاط تجهیز {eq_name_val}',
+                                    labels={'Average_Vib': 'میانگین لرزش (mm/s)', point_col: 'نقطه'},
+                                    color='Average_Vib', color_continuous_scale='RdYlGn_r')
+                    st.plotly_chart(fig_bar, use_container_width=True)
+                else:
+                    st.info('برای نمایش مقایسه نقاط، لطفاً یک تاریخ مشخص را انتخاب کنید.')
+            with tab3:
+                st.markdown('#### وضعیت کلی سلامت تجهیزات (بر اساس آخرین داده)')
+                # تحلیل وضعیت کلی
+                if vib_cols:
+                    # پیدا کردن بیشترین لرزش در هر ردیف
+                    df['Max_Vib'] = df[vib_cols].apply(pd.to_numeric, errors='coerce').max(axis=1)
+                    def categorize(val):
+                        if pd.isna(val): return 'نامشخص'
+                        if val > 7.1: return 'بحرانی'
+                        if val > 4.5: return 'هشدار'
+                        return 'سالم'
+                    df['Status'] = df['Max_Vib'].apply(categorize)
+                    status_counts = df['Status'].value_counts()
+                    fig_pie = px.pie(values=status_counts.values, names=status_counts.index, 
+                                   color=status_counts.index,
+                                   color_discrete_map={'سالم': '#2e7d32', 'هشدار': '#ffa500', 'بحرانی': '#ff4b4b'},
+                                   title='درصد وضعیت سلامت تجهیزات کارخانه')
+                    st.plotly_chart(fig_pie, use_container_width=True)
     else:
         st.info('🔎 هیچ داده‌ای با این فیلترها یافت نشد.')
     st.markdown('<div style="text-align:center; margin-top:20px; font-weight:bold;">طراحی و توسعه: مهندس هادی زندیه | شرکت فاز فیدار پارسیان</div>', unsafe_allow_html=True)
