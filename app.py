@@ -14,6 +14,8 @@ USER_CREDENTIALS = {
     'alireza76ir@gmail.com': 'siman123',
     'vah.rezaei@gmail.com': 'siman123',
     'cm.zandiyeh@gmail.com': 'siman123',
+    'm.babahasan@gmail.com': 'siman123',
+    'freedocs.ir@gmail.com': 'siman123',
     'tehrancement@gmail.com': 'siman123',
     'masoud.sa.1989823@gmail.com': 'siman123',
 }
