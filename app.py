@@ -183,8 +183,36 @@ if df is not None:
                         if not logistics.empty:
                             with st.expander('📦 اطلاعات لجستیکی و قطعات', expanded=True):
                                 st.dataframe(logistics, hide_index=True, use_container_width=True)
+        
+        # ==============================================================================
+        # بخش اصلاح شده نمایش جدول با رنگ‌بندی
+        # ==============================================================================
+        
+        def color_vibration_cells(val):
+            try:
+                # تبدیل مقدار به عدد برای مقایسه (تبدیل متون احتمالی به عدد)
+                v = float(str(val).replace(',', '.')) 
+                if v > 7.1:
+                    return 'background-color: #ff4b4b; color: white' # قرمز
+                elif v > 4.5:
+                    return 'background-color: #ffa500; color: white' # زرد
+                else:
+                    return 'background-color: #2e7d32; color: white' # سبز
+            except:
+                return '' # اگر مقدار عدد نبود رنگ نده
+
         st.markdown('### 📋 جدول جزئیات پایش')
-        st.dataframe(filtered_df, use_container_width=True)
+        
+        # پیدا کردن ستون‌های ارتعاشی برای اعمال رنگ (عمودی، افقی، محوری)
+        vib_cols = [c for c in filtered_df.columns if any(k in str(c) for k in ['عمودی', 'افقی', 'محوری'])]
+        
+        if vib_cols:
+            # اعمال رنگ‌آمیزی فقط روی ستون‌های ارتعاشات
+            styled_df = filtered_df.style.applymap(color_vibration_cells, subset=vib_cols)
+            st.dataframe(styled_df, use_container_width=True)
+        else:
+            st.dataframe(filtered_df, use_container_width=True)
+
         # ==============================================================================
         # 7. بخش تحلیل‌های بصری و نمودارها
         # ==============================================================================
