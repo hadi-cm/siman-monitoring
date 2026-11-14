@@ -210,7 +210,7 @@ if df is not None:
         
         if vib_cols:
             # اعمال رنگ‌آمیزی فقط روی ستون‌های ارتعاشات
-            styled_df = filtered_df.style.applymap(color_vibration_cells, subset=vib_cols)
+            styled_df = filtered_df.style.map(color_vibration_cells, subset=vib_cols)
             st.dataframe(styled_df, use_container_width=True)
         else:
             st.dataframe(filtered_df, use_container_width=True)
