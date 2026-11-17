@@ -88,20 +88,34 @@ st.markdown(f'''
 # ==============================================================================
 # 4. بارگذاری داده‌ها
 # ==============================================================================
+# نکته: اگر باز هم خطای 400 گرفتید، حتماً از گزینه Publish to Web در گوگل شیت استفاده کنید
 VIB_URL = 'https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=0'
 ASSETS_URL = 'https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=1'
-@st.cache_data
+
+@st.cache_data(ttl=600) # کش کردن داده‌ها برای ۱۰ دقیقه جهت جلوگیری از درخواست‌های زیاد به گوگل
 def load_all_data():
     try:
+        # تلاش برای خواندن دیتای ارتعاشات
         df_vib = pd.read_csv(VIB_URL)
-        df_assets = pd.read_csv(ASSETS_URL)
-        # تبدیل تاریخ‌ها در دیتای ارتعاشات
+        
+        # تبدیل تاریخ‌ها
         date_col = smart_find_column(df_vib.columns, ['تاریخ', 'Date'])
         if date_col:
             df_vib[date_col] = pd.to_datetime(df_vib[date_col], errors='coerce')
+            
+        # تلاش برای خواندن دیتای Assets
+        try:
+            df_assets = pd.read_csv(ASSETS_URL)
+        except:
+            df_assets = pd.DataFrame() # اگر شیت دوم وجود نداشت، برنامه متوقف نشود
+            
         return df_vib, df_assets
+        
     except Exception as e:
-        st.error(f"خطا در بارگذاری داده‌ها: {e}")
+        # نمایش خطای دقیق برای عیب‌یابی
+        st.error(f"❌ خطا در دریافت داده‌ها از گوگل شیت.")
+        st.info(f"🔍 علت فنی خطا: {e}")
+        st.warning("💡 پیشنهاد: اگر خطای 400 دریافت می‌کنید، در گوگل شیت گزینه 'Publish to Web' را فعال کرده و لینک CSV جدید را جایگزین کنید.")
         return pd.DataFrame(), pd.DataFrame()
 df, df_assets = load_all_data()
 # ==============================================================================
