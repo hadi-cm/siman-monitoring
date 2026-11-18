@@ -207,9 +207,6 @@ if not df.empty:
         filtered_df['temp_date_sort'] = pd.to_datetime(filtered_df[date_col], errors='coerce')
         filtered_df = filtered_df.sort_values(by='temp_date_sort', ascending=False).drop(columns=['temp_date_sort'])
 
-
-### 💡 چرا این بار کار می‌کند؟
-
     ==============================================================================
     # 6. منطق فیلتر کردن (بدون ایجاد تو رفتگی در نمایش)
     # ==============================================================================
