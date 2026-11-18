@@ -186,7 +186,7 @@ else:
  # ==============================================================================
  # 6. منطق فیلتر کردن نهایی (اعمال تمام فیلترها روی دیتای اصلی)
  # ==============================================================================
-    filtered_df = df.copy()
+ filtered_df = df.copy()
 
     # ۱. اعمال فیلتر خط تولید
     if sel_line != "همه" and col_line:
@@ -220,60 +220,60 @@ else:
         filtered_df['temp_date_sort'] = pd.to_datetime(filtered_df[date_col], errors='coerce')
         filtered_df = filtered_df.sort_values(by='temp_date_sort', ascending=False).drop(columns=['temp_date_sort'])
 
-  # ==============================================================================
-  # 7. نمایش محتوا
-  # ==============================================================================
-    st.title("📊 تحلیل روند ارتعاشات تجهیزات")
-    if selected_equipment != "همه تجهیزات":
-        # --- نمایش مشخصات فنی از df_assets ---
-        if df_assets is not None and not df_assets.empty:
-            asset_name_col = smart_find_column(df_assets.columns, ['نام تجهیز', 'نام', 'تجهیز'])
-            if asset_name_col:
-                target_clean = clean_text(selected_equipment)
-                asset_rows = df_assets[df_assets[asset_name_col].apply(lambda x: target_clean in clean_text(x) or clean_text(x) in target_clean)].copy()
-                if not asset_rows.empty:
-                    first_row = asset_rows.iloc[0]
-                    def get_val_safe(k_list):
-                        col_found = smart_find_column(df_assets.columns, k_list)
-                        if col_found:
-                            v = str(first_row[col_found]).strip()
-                            return v if v.lower() not in ['nan', 'none', ''] else '---'
-                        return '---'
-                    eq_type = get_val_safe(['نوع'])
-                    st.markdown(f'''
-                    <div style='background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-right: 10px solid #1E3A8D; margin-bottom: 15px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05);'>
-                        <h3 style='color: #1E3A8D; margin-top: 0; font-family: Tahoma;'>🛠️ مشخصات فنی: {selected_equipment}</h3>
-                        <div style='display: flex; justify-content: space-between; font-size: 16px; color: #333; flex-wrap: wrap; gap: 10px;'>
-                            <span><b style='color: #1E3A8D;'>🔹 نوع:</b> {eq_type}</span>
-                            <span><b style='color: #1E3A8D;'>🔹 دور:</b> {get_val_safe(['دور'])} RPM</span>
-                            <span><b style='color: #1E3A8D;'>🔹 واحد:</b> {get_val_safe(['واحد'])}</span>
-                        </div>
-                        <div style='margin-top: 12px; font-size: 15px; color: #1E3A8D; background: #e6efff; padding: 8px 15px; border-radius: 8px; display: inline-block;'>
-                            <b style='color: #1E3A8D;'>📍 راهنمای نقاط (P-Map):</b> {get_point_guide(selected_equipment, eq_type)}
-                        </div>
-                    </div>
-                    ''', unsafe_allow_html=True)
-                    # بخش لجستیک
-                    pts = smart_find_column(df_assets.columns, ['نقطه'])
-                    brg = smart_find_column(df_assets.columns, ['بیرینگ'])
-                    bsh = smart_find_column(df_assets.columns, ['بوش'])
-                    cols_to_show = [c for c in [pts, brg, bsh] if c is not None]
-                    if cols_to_show:
-                        logistics = asset_rows[cols_to_show].copy()
-                        logistics = logistics.replace(['nan', 'None', ''], '---').fillna('---')
-                        rename_map = {pts: 'نقطه', brg: 'شماره بیرینگ', bsh: 'شماره بوش'}
-                        logistics = logistics.rename(columns=rename_map)
-                        with st.expander('📦 اطلاعات لجستیکی و قطعات', expanded=True):
-                            st.dataframe(logistics, hide_index=True, use_container_width=True)
-    # --- نمایش جدول ارتعاشات با رنگ‌بندی ---
+ # ==============================================================================
+ # 7. نمایش محتوا
+ # ==============================================================================
+ st.title("📊 تحلیل روند ارتعاشات تجهیزات")
+
     if not filtered_df.empty:
-        conn_col = smart_find_column(filtered_df.columns, ['نوع اتصال', 'Connection'])
-        if conn_col and selected_equipment != "همه تجهیزات":
-            connection_type = filtered_df[conn_col].iloc[0]
-            st.info(f"🔌 *نوع اتصال تجهیز انتخاب شده: {connection_type}")
+        # --- نمایش مشخصات فنی (فقط اگر تجهیز انتخاب شده باشد) ---
+        if selected_equipment != "همه تجهیزات":
+            if df_assets is not None and not df_assets.empty:
+                asset_name_col = smart_find_column(df_assets.columns, ['نام تجهیز', 'نام', 'تجهیز'])
+                if asset_name_col:
+                    target_clean = clean_text(selected_equipment)
+                    asset_rows = df_assets[df_assets[asset_name_col].apply(lambda x: target_clean in clean_text(x) or clean_clean(x) in target_clean)].copy()
+                    
+                    if not asset_rows.empty:
+                        first_row = asset_rows.iloc[0]
+                        def get_val_safe(k_list):
+                            col_found = smart_find_column(df_assets.columns, k_list)
+                            if col_found:
+                                v = str(first_row[col_found]).strip()
+                                return v if v.lower() not in ['nan', 'none', ''] else '---'
+                            return '---'
+                        
+                        eq_type = get_val_safe(['نوع'])
+                        st.markdown(f'''
+                        <div style='background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-right: 10px solid #1E3A8D; margin-bottom: 15px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05);'>
+                            <h3 style='color: #1E3A8D; margin-top: 0; font-family: Tahoma;'>🛠️ مشخصات فنی: {selected_equipment}</h3>
+                            <div style='display: flex; justify-content: space-between; font-size: 16px; color: #333; flex-wrap: wrap; gap: 10px;'>
+                                <span><b style='color: #1E3A8D;'>🔹 نوع:</b> {eq_type}</span>
+                                <span><b style='color: #1E3A8D;'>🔹 دور:</b> {get_val_safe(['دور'])} RPM</span>
+                                <span><b style='color: #1E3A8D;'>🔹 واحد:</b> {get_val_safe(['واحد'])}</span>
+                            </div>
+                            <div style='margin-top: 12px; font-size: 15px; color: #1E3A8D; background: #e6efff; padding: 8px 15px; border-radius: 8px; display: inline-block;'>
+                                <b style='color: #1E3A8D;'>📍 راهنمای نقاط (P-Map):</b> {get_point_guide(selected_equipment, eq_type)}
+                            </div>
+                        </div>
+                        ''', unsafe_allow_html=True)
 
+                        # بخش لجستیک
+                        pts = smart_find_column(df_assets.columns, ['نقطه'])
+                        brg = smart_find_column(df_assets.columns, ['بیرینگ'])
+                        bsh = smart_find_column(df_assets.columns, ['بوش'])
+                        cols_to_show = [c for c in [pts, brg, bsh] if c is not None]
+                        if cols_to_show:
+                            logistics = asset_rows[cols_to_show].copy()
+                            logistics = logistics.replace(['nan', 'None', ''], '---').fillna('---')
+                            rename_map = {pts: 'نقطه', brg: 'شماره بیرینگ', bsh: 'شماره بوش'}
+                            logistics = logistics.rename(columns=rename_map)
+                            with st.expander('📦 اطلاعات لجستیکی و قطعات', expanded=True):
+                                st.dataframe(logistics, hide_index=True, use_container_width=True)
+
+        # --- نمایش جدول ارتعاشات ---
         st.markdown(f"### 📋 نتایج یافت شده ({len(filtered_df)} مورد)")
-
+        
         def color_vibration_cells(val):
             try:
                 v = float(str(val).replace(',', '.')) 
@@ -288,6 +288,7 @@ else:
             st.dataframe(styled_df, use_container_width=True)
         else:
             st.dataframe(filtered_df, use_container_width=True)
+
     else:
         st.warning("⚠️ هیچ داده‌ای با این فیلترها پیدا نشد.")
 
@@ -295,4 +296,5 @@ else:
     st.markdown('<div style="text-align:center; margin-top:40px; font-weight:bold; color: #555; font-family: Tahoma;">طراحی و توسعه: مهندس هادی زندیه | شرکت فاز فیدار پارسیان</div>', unsafe_allow_html=True)
 
 else:
-    st.error("خطا در بارگذاری داده‌ها. لطفاً اتصال اینترنت یا لینک گوگل‌شیت را بررسی کنید.")
+    st.error("❌ خطا در دریافت داده‌ها. لطفاً اتصال اینترنت و لینک گوگل‌شیت را بررسی کنید # ==============================================================================
+
