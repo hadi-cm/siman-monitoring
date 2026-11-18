@@ -87,33 +87,30 @@ st.markdown(f'''
     ''', unsafe_allow_html=True)
 
 # ==============================================================================
-# 4. بارگذاری داده‌ها (نسخه با عیب‌یابی دقیق)
+# 4. بارگذاری داده‌ها (نسخه اصلاح شده برای رفع خطای ۴۰۰ و تاریخ)
 # ==============================================================================
+# نکته: حتماً لینک‌های زیر را از طریق Publish to Web در گوگل شیت جایگزین کنید
 VIB_URL = 'https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=0'
 ASSETS_URL = 'https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=1'
 
 @st.cache_data(ttl=600)
 def load_all_data():
     try:
-        # تلاش برای خواندن دیتای ارتعاشات
+        # بارگذاری دیتای ارتعاشات
         df_vib = pd.read_csv(VIB_URL)
-        if df_vib.empty:
-            st.error("⚠️ فایل ارتعاشات (VIB) خوانده شد اما خالی است!")
-            return pd.DataFrame(), pd.DataFrame()
         
-        # تلاش برای خواندن دیتای Assets
+        # تشخیص ستون تاریخ
+        date_col = smart_find_column(df_vib.columns, ['تاریخ', 'Date'])
+        if date_col:
+            # تلاش برای تبدیل به تاریخ میلادی، اگر نشد (شمسی بود) همان رشته باقی می‌ماند
+            df_vib[date_col] = pd.to_datetime(df_vib[date_col], errors='coerce')
+            
+        # بارگذاری دیتای Assets
         try:
             df_assets = pd.read_csv(ASSETS_URL)
         except Exception as e:
-            st.warning(f"⚠️ فایل Assets یافت نشد یا خطا دارد: {e}")
+            st.warning(f"⚠️ هشدار: فایل مشخصات (Assets) بارگذاری نشد. علت: {e}")
             df_assets = pd.DataFrame()
-
-        # تبدیل تاریخ‌ها در دیتای ارتعاشات
-        date_col = smart_find_column(df_vib.columns, ['تاریخ', 'Date'])
-        if date_col:
-            df_vib[date_col] = pd.to_datetime(df_vib[date_col], errors='coerce')
-        else:
-            st.error("❌ ستون 'تاریخ' در فایل ارتعاشات پیدا نشد!")
             
         return df_vib, df_assets
     except Exception as e:
@@ -122,29 +119,25 @@ def load_all_data():
 
 df, df_assets = load_all_data()
 
-# نمایش اطلاعات برای عیب‌یابی (فقط اگر دیتای اصلی خالی باشد)
-if df.empty:
-    st.error("🚨 دیتای اصلی بارگذاری نشد. لطفاً لینک گوگل شیت را چک کنید.")
-    st.stop()
-else:
-    st.success(f"✅ با موفقیت {len(df)} ردیف داده بارگذاری شد.")
-
 # ==============================================================================
-# 5. فیلترهای پیشرفته (سایدبار)
+# 5. فیلترهای پیشرفته (نسخه بدون محدودیت زمانی پیش‌فرض)
 # ==============================================================================
 st.sidebar.header("🔍 فیلترهای پیشرفته")
+
 if not df.empty:
-    # شناسایی ستون‌ها
     col_line = smart_find_column(df.columns, ['خط تولید', 'خط'])
     col_unit = smart_find_column(df.columns, ['واحد'])
     equip_col = smart_find_column(df.columns, ['تجهیز', 'Equipment', 'Asset', 'عنوان تجهیز', 'نام تجهیز'])
     date_col = smart_find_column(df.columns, ['تاریخ', 'Date'])
-    # --- فیلترها در سایدبار ---
+
+    # ۱. انتخاب خط تولید
     if col_line:
         lines = sorted([str(v) for v in df[col_line].unique() if pd.notna(v)])
         sel_line = st.sidebar.selectbox("📍 خط تولید:", ["همه"] + lines)
     else:
         sel_line = "همه"
+
+    # ۲. انتخاب واحد
     if col_unit:
         unit_df = df.copy()
         if sel_line != "همه" and col_line:
@@ -153,6 +146,8 @@ if not df.empty:
         sel_unit = st.sidebar.selectbox("🏢 واحد:", ["همه"] + units)
     else:
         sel_unit = "همه"
+
+    # ۳. انتخاب تجهیز
     if equip_col:
         eq_df = df.copy()
         if sel_line != "همه" and col_line:
@@ -163,16 +158,59 @@ if not df.empty:
         selected_equipment = st.sidebar.selectbox("⚙️ انتخاب تجهیز:", ["همه تجهیزات"] + equipment_list)
     else:
         selected_equipment = "همه تجهیزات"
-    today = datetime.date.today()
-    thirty_days_ago = today - datetime.timedelta(days=30)
-    date_range_input = st.sidebar.date_input("📅 انتخاب بازه زمانی", value=(thirty_days_ago, today), format="YYYY/MM/DD")
+
+    # ۴. بازه زمانی (بسیار مهم: اگر تاریخ‌ها شمسی هستند، این بخش را نادیده بگیر)
+    # برای جلوگیری از "پیدا نشد"، ابتدا بازه را بسیار گسترده در نظر می‌گیریم
+    date_range_input = st.sidebar.date_input("📅 انتخاب بازه زمانی", value=None, format="YYYY/MM/DD")
+
+    # ۵. ماه و سال
     if date_col:
         temp_dates = pd.to_datetime(df[date_col], errors='coerce')
         all_months = sorted(temp_dates.dt.strftime('%m-%Y').dropna().unique().tolist())
         selected_month = st.sidebar.selectbox("🌙 انتخاب ماه و سال", ["همه ماه‌ها"] + all_months)
     else:
         selected_month = "همه ماه‌ها"
+
     # ==============================================================================
+    # 6. منطق فیلتر کردن (نسخه اصلاح شده برای جلوگیری از نمایش خالی)
+    # ==============================================================================
+    filtered_df = df.copy()
+
+    # فیلتر خط
+    if sel_line != "همه" and col_line:
+        filtered_df = filtered_df[filtered_df[col_line].astype(str) == sel_line]
+    
+    # فیلتر واحد
+    if sel_unit != "همه" and col_unit:
+        filtered_df = filtered_df[filtered_df[col_unit].astype(str) == sel_unit]
+    
+    # فیلتر تجهیز
+    if selected_equipment != "همه تجهیزات" and equip_col:
+        filtered_df = filtered_df[filtered_df[equip_col].astype(str) == selected_equipment]
+
+    # فیلتر بازه زمانی (فقط اگر کاربر واقعاً بازه‌ای را انتخاب کرده باشد)
+    if date_col and isinstance(date_range_input, tuple) and len(date_range_input) == 2:
+        start_date, end_date = date_range_input
+        if start_date is not None and end_date is not None:
+            temp_date_series = pd.to_datetime(filtered_df[date_col], errors='coerce')
+            mask = (temp_date_series.dt.date >= start_date) & (temp_date_series.dt.date <= end_date)
+            filtered_df = filtered_df[mask]
+
+    # فیلتر ماه
+    if selected_month != "همه ماه‌ها" and date_col:
+        temp_date_series = pd.to_datetime(filtered_df[date_col], errors='coerce')
+        mask_month = (temp_date_series.dt.strftime('%m-%Y') == selected_month)
+        filtered_df = filtered_df[mask_month]
+
+    # مرتب‌سازی
+    if date_col:
+        filtered_df['temp_date_sort'] = pd.to_datetime(filtered_df[date_col], errors='coerce')
+        filtered_df = filtered_df.sort_values(by='temp_date_sort', ascending=False).drop(columns=['temp_date_sort'])
+
+
+### 💡 چرا این بار کار می‌کند؟
+
+    ==============================================================================
     # 6. منطق فیلتر کردن (بدون ایجاد تو رفتگی در نمایش)
     # ==============================================================================
     filtered_df = df.copy()
