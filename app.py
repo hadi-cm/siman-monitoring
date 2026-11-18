@@ -118,41 +118,65 @@ def load_all_data():
         st.warning("💡 پیشنهاد: اگر خطای 400 دریافت می‌کنید، در گوگل شیت گزینه 'Publish to Web' را فعال کرده و لینک CSV جدید را جایگزین کنید.")
         return pd.DataFrame(), pd.DataFrame()
 df, df_assets = load_all_data()
-# ==============================================================================
+# =============================================================================
 # 5. فیلترهای پیشرفته (سایدبار)
 # ==============================================================================
 st.sidebar.header("🔍 فیلترهای پیشرفته")
+
 if not df.empty:
     equip_col = smart_find_column(df.columns, ['تجهیز', 'Equipment', 'Asset', 'عنوان تجهیز', 'نام تجهیز'])
     date_col = smart_find_column(df.columns, ['تاریخ', 'Date'])
-    # ۱. انتخاب تجهیز
-    equipment_list = sorted(df[equip_col].unique().tolist()) if equip_col else []
-    selected_equipment = st.sidebar.selectbox("⚙️ انتخاب تجهیز", ["همه تجهیزات"] + equipment_list)
+
+    # ۱. انتخاب تجهیز (اصلاح شده برای جلوگیری از TypeError)
+    if equip_col:
+        # ابتدا تمام مقادیر را می‌گیریم، سپس مقادیر غیر خالی (notna) را فیلتر می‌کنیم، سپس به رشته تبدیل می‌کنیم
+        equipment_list = sorted([str(v) for v in df[equip_col].unique() if pd.notna(v) and str(v).strip() != ''])
+        selected_equipment = st.sidebar.selectbox("⚙️ انتخاب تجهیز", ["همه تجهیزات"] + equipment_list)
+    else:
+        selected_equipment = "همه تجهیزات"
+
     # ۲. فیلتر بازه زمانی
     date_range = st.sidebar.date_input(
         "📅 انتخاب بازه زمانی",
         value=(None, None),
         format="YYYY/MM/DD"
     )
+
     # ۳. فیلتر ماه و سال
     if date_col:
-        all_months = sorted(df[date_col].dt.strftime('%m-%Y').unique().tolist())
+        # تبدیل تاریخ برای اطمینان از اینکه مقادیر خالی باعث خطا نمی‌شوند
+        temp_dates = pd.to_datetime(df[date_col], errors='coerce')
+        # فقط ماه‌هایی که تاریخ معتبر دارند را نشان بده
+        all_months = sorted(temp_dates.dt.strftime('%m-%Y').dropna().unique().tolist())
         selected_month = st.sidebar.selectbox("🌙 انتخاب ماه و سال", ["همه ماه‌ها"] + all_months)
     else:
         selected_month = "همه ماه‌ها"
+
     # ==============================================================================
-    # 6. منطق فیلتر کردن و مرتب‌سازی
+    # 6. منطق فیلتر کردن و مرتب‌سازی (بدون تغییر در منطق قبلی، فقط برای امنیت بیشتر)
     # ==============================================================================
     filtered_df = df.copy()
+
     if selected_equipment != "همه تجهیزات" and equip_col:
-        filtered_df = filtered_df[filtered_df[equip_col] == selected_equipment]
+        filtered_df = filtered_df[filtered_df[equip_col].astype(str) == selected_equipment]
+
     if date_col and len(date_range) == 2 and date_range[0] is not None and date_range[1] is not None:
         start_date, end_date = date_range
-        filtered_df = filtered_df[(filtered_df[date_col].dt.date >= start_date) & (filtered_df[date_col].dt.date <= end_date)]
+        # تبدیل ستون تاریخ به datetime موقت برای فیلتر بازه
+        temp_date_series = pd.to_datetime(filtered_df[date_col], errors='coerce')
+        mask = (temp_date_series.dt.date >= start_date) & (temp_date_series.dt.date <= end_date)
+        filtered_df = filtered_df[mask]
+
     if selected_month != "همه ماه‌ها" and date_col:
-        filtered_df = filtered_df[filtered_df[date_col].dt.strftime('%m-%Y') == selected_month]
+        temp_date_series = pd.to_datetime(filtered_df[date_col], errors='coerce')
+        mask_month = (temp_date_series.dt.strftime('%m-%Y') == selected_month)
+        filtered_df = filtered_df[mask_month]
+
     if date_col:
-        filtered_df = filtered_df.sort_values(by=date_col, ascending=False)
+        # مرتب‌سازی بر اساس تاریخ (تبدیل به datetime برای مرتب‌سازی درست)
+        filtered_df['temp_date_sort'] = pd.to_datetime(filtered_df[date_col], errors='coerce')
+        filtered_df = filtered_df.sort_values(by='temp_date_sort', ascending=False).drop(columns=['temp_date_sort'])
+
     # ==============================================================================
     # 7. نمایش محتوا
     # ==============================================================================
