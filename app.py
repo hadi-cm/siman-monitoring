@@ -133,173 +133,132 @@ else:
 # 5. فیلترهای پیشرفته (سایدبار)
 # ==============================================================================
 st.sidebar.header("🔍 فیلترهای پیشرفته")
-
-# شناسایی ستون‌ها (بسیار مهم برای فیلترها)
-col_line = smart_find_column(df.columns, ['خط تولید', 'خط'])
-col_unit = smart_find_column(df.columns, ['واحد'])
-equip_col = smart_find_column(df.columns, ['تجهیز', 'Equipment', 'Asset', 'عنوان تجهیز', 'نام تجهیز'])
-date_col = smart_find_column(df.columns, ['تاریخ', 'Date'])
-
-# ۱. انتخاب خط تولید
-if col_line:
-    lines = sorted([str(v) for v in df[col_line].unique() if pd.notna(v)])
-    sel_line = st.sidebar.selectbox("📍 خط تولید:", ["همه"] + lines)
-else:
-    sel_line = "همه"
-
-# ۲. انتخاب واحد (وابسته به خط)
-if col_unit:
-    unit_df = df.copy()
-    if sel_line != "همه" and col_line:
-        unit_df = unit_df[unit_df[col_line].astype(str) == sel_line]
-    units = sorted([str(v) for v in unit_df[col_unit].unique() if pd.notna(v)])
-    sel_unit = st.sidebar.selectbox("🏢 واحد:", ["همه"] + units)
-else:
-    sel_unit = "همه"
-
-# ۳. انتخاب تجهیز (وابسته به خط و واحد)
-if equip_col:
-    eq_df = df.copy()
-    if sel_line != "همه" and col_line:
-        eq_df = eq_df[eq_df[col_line].astype(str) == sel_line]
-    if sel_unit != "همه" and col_unit:
-        eq_df = eq_df[eq_df[col_unit].astype(str) == sel_unit]
-    
-    equipment_list = sorted([str(v) for v in eq_df[equip_col].unique() if pd.notna(v) and str(v).strip() != ''])
-    selected_equipment = st.sidebar.selectbox("⚙️ انتخاب تجهیز:", ["همه تجهیزات"] + equipment_list)
-else:
-    selected_equipment = "همه تجهیزات"
-
-# ۴. بازه زمانی
-today = datetime.date.today()
-thirty_days_ago = today - datetime.timedelta(days=30)
-date_range_input = st.sidebar.date_input("📅 انتخاب بازه زمانی", value=(thirty_days_ago, today), format="YYYY/MM/DD")
-
-# ۵. ماه و سال
-if date_col:
-    temp_dates = pd.to_datetime(df[date_col], errors='coerce')
-    all_months = sorted(temp_dates.dt.strftime('%m-%Y').dropna().unique().tolist())
-    selected_month = st.sidebar.selectbox("🌙 انتخاب ماه و سال", ["همه ماه‌ها"] + all_months)
-else:
-    selected_month = "همه ماه‌ها"
-
+if not df.empty:
+    # شناسایی ستون‌ها
+    col_line = smart_find_column(df.columns, ['خط تولید', 'خط'])
+    col_unit = smart_find_column(df.columns, ['واحد'])
+    equip_col = smart_find_column(df.columns, ['تجهیز', 'Equipment', 'Asset', 'عنوان تجهیز', 'نام تجهیز'])
+    date_col = smart_find_column(df.columns, ['تاریخ', 'Date'])
+    # --- فیلترها در سایدبار ---
+    if col_line:
+        lines = sorted([str(v) for v in df[col_line].unique() if pd.notna(v)])
+        sel_line = st.sidebar.selectbox("📍 خط تولید:", ["همه"] + lines)
+    else:
+        sel_line = "همه"
+    if col_unit:
+        unit_df = df.copy()
+        if sel_line != "همه" and col_line:
+            unit_df = unit_df[unit_df[col_line].astype(str) == sel_line]
+        units = sorted([str(v) for v in unit_df[col_unit].unique() if pd.notna(v)])
+        sel_unit = st.sidebar.selectbox("🏢 واحد:", ["همه"] + units)
+    else:
+        sel_unit = "همه"
+    if equip_col:
+        eq_df = df.copy()
+        if sel_line != "همه" and col_line:
+            eq_df = eq_df[eq_df[col_line].astype(str) == sel_line]
+        if sel_unit != "همه" and col_unit:
+            eq_df = eq_df[eq_df[col_unit].astype(str) == sel_unit]
+        equipment_list = sorted([str(v) for v in eq_df[equip_col].unique() if pd.notna(v) and str(v).strip() != ''])
+        selected_equipment = st.sidebar.selectbox("⚙️ انتخاب تجهیز:", ["همه تجهیزات"] + equipment_list)
+    else:
+        selected_equipment = "همه تجهیزات"
+    today = datetime.date.today()
+    thirty_days_ago = today - datetime.timedelta(days=30)
+    date_range_input = st.sidebar.date_input("📅 انتخاب بازه زمانی", value=(thirty_days_ago, today), format="YYYY/MM/DD")
+    if date_col:
+        temp_dates = pd.to_datetime(df[date_col], errors='coerce')
+        all_months = sorted(temp_dates.dt.strftime('%m-%Y').dropna().unique().tolist())
+        selected_month = st.sidebar.selectbox("🌙 انتخاب ماه و سال", ["همه ماه‌ها"] + all_months)
+    else:
+        selected_month = "همه ماه‌ها"
     # ==============================================================================
-    # 6. منطق فیلتر کردن نهایی (اعمال تمام فیلترها روی دیتای اصلی)
+    # 6. منطق فیلتر کردن (بدون ایجاد تو رفتگی در نمایش)
     # ==============================================================================
     filtered_df = df.copy()
-
-    # ۱. اعمال فیلتر خط تولید
     if sel_line != "همه" and col_line:
         filtered_df = filtered_df[filtered_df[col_line].astype(str) == sel_line]
-
-    # ۲. اعمال فیلتر واحد
     if sel_unit != "همه" and col_unit:
         filtered_df = filtered_df[filtered_df[col_unit].astype(str) == sel_unit]
-
-    # ۳. اعمال فیلتر تجهیز
     if selected_equipment != "همه تجهیزات" and equip_col:
         filtered_df = filtered_df[filtered_df[equip_col].astype(str) == selected_equipment]
-
-    # ۴. اعمال فیلتر بازه زمانی
-    if date_col:
-        if isinstance(date_range_input, tuple) and len(date_range_input) == 2:
-            start_date, end_date = date_range_input
-            if start_date is not None and end_date is not None:
-                temp_date_series = pd.to_datetime(filtered_df[date_col], errors='coerce')
-                mask = (temp_date_series.dt.date >= start_date) & (temp_date_series.dt.date <= end_date)
-                filtered_df = filtered_df[mask]
-
-    # ۵. اعمال فیلتر ماه
+    if date_col and isinstance(date_range_input, tuple) and len(date_range_input) == 2:
+        start_date, end_date = date_range_input
+        if start_date is not None and end_date is not None:
+            temp_date_series = pd.to_datetime(filtered_df[date_col], errors='coerce')
+            mask = (temp_date_series.dt.date >= start_date) & (temp_date_series.dt.date <= end_date)
+            filtered_df = filtered_df[mask]
     if selected_month != "همه ماه‌ها" and date_col:
         temp_date_series = pd.to_datetime(filtered_df[date_col], errors='coerce')
         mask_month = (temp_date_series.dt.strftime('%m-%Y') == selected_month)
         filtered_df = filtered_df[mask_month]
-
-    # مرتب‌سازی نهایی (جدیدترین در بالا)
     if date_col:
         filtered_df['temp_date_sort'] = pd.to_datetime(filtered_df[date_col], errors='coerce')
         filtered_df = filtered_df.sort_values(by='temp_date_sort', ascending=False).drop(columns=['temp_date_sort'])
-
     # ==============================================================================
-    # 7. نمایش محتوا
+    # 7. نمایش محتوا (تراز شده کامل با لبه راست)
     # ==============================================================================
+    # حذف تمام حاشیه‌های اضافی با CSS
+    st.markdown("""
+        <style>
+        .main .block-container {
+            padding-right: 1rem;
+            padding-left: 1rem;
+        }
+        </style>
+        """, unsafe_allow_html=True)
     st.title("📊 تحلیل روند ارتعاشات تجهیزات")
-
     if not filtered_df.empty:
-        # --- نمایش مشخصات فنی (فقط اگر تجهیز انتخاب شده باشد) ---
-        if selected_equipment != "همه تجهیزات":
-            if df_assets is not None and not df_assets.empty:
-                asset_name_col = smart_find_column(df_assets.columns, ['نام تجهیز', 'نام', 'تجهیز'])
-                if asset_name_col:
-                    target_clean = clean_text(selected_equipment)
-                    asset_rows = df_assets[df_assets[asset_name_col].apply(lambda x: target_clean in clean_text(x) or clean_clean(x) in target_clean)].copy()
-                    
-                    if not asset_rows.empty:
-                        first_row = asset_rows.iloc[0]
-                        def get_val_safe(k_list):
-                            col_found = smart_find_column(df_assets.columns, k_list)
-                            if col_found:
-                                v = str(first_row[col_found]).strip()
-                                return v if v.lower() not in ['nan', 'none', ''] else '---'
-                            return '---'
-                        
-                        eq_type = get_val_safe(['نوع'])
-                        st.markdown(f'''
-                        <div style='background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-right: 10px solid #1E3A8D; margin-bottom: 15px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05);'>
-                            <h3 style='color: #1E3A8D; margin-top: 0; font-family: Tahoma;'>🛠️ مشخصات فنی: {selected_equipment}</h3>
-                            <div style='display: flex; justify-content: space-between; font-size: 16px; color: #333; flex-wrap: wrap; gap: 10px;'>
-                                <span><b style='color: #1E3A8D;'>🔹 نوع:</b> {eq_type}</span>
-                                <span><b style='color: #1E3A8D;'>🔹 دور:</b> {get_val_safe(['دور'])} RPM</span>
-                                <span><b style='color: #1E3A8D;'>🔹 واحد:</b> {get_val_safe(['واحد'])}</span>
-                            </div>
-                            <div style='margin-top: 12px; font-size: 15px; color: #1E3A8D; background: #e6efff; padding: 8px 15px; border-radius: 8px; display: inline-block;'>
-                                <b style='color: #1E3A8D;'>📍 راهنمای نقاط (P-Map):</b> {get_point_guide(selected_equipment, eq_type)}
-                            </div>
+        if selected_equipment != "همه تجهیزات" and not df_assets.empty:
+            asset_name_col = smart_find_column(df_assets.columns, ['نام تجهیز', 'نام', 'تجهیز'])
+            if asset_name_col:
+                target_clean = clean_text(selected_equipment)
+                asset_rows = df_assets[df_assets[asset_name_col].apply(lambda x: target_clean in clean_text(x) or clean_text(x) in target_clean)].copy()
+                if not asset_rows.empty:
+                    first_row = asset_rows.iloc[0]
+                    def get_val_safe(k_list):
+                        c = smart_find_column(df_assets.columns, k_list)
+                        if c:
+                            v = str(first_row[c]).strip()
+                            return v if v.lower() not in ['nan', 'none', ''] else '---'
+                        return '---'
+                    e_type = get_val_safe(['نوع'])
+                    st.markdown(f'''
+                    <div style='background-color: #f0f7ff; padding: 20px; border-radius: 15px; border-right: 10px solid #1E3A8D; margin-bottom: 15px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); text-align: right; direction: rtl;'>
+                        <h3 style='color: #1E3A8D; margin-top: 0; font-family: Tahoma;'>🛠️ مشخصات فنی: {selected_equipment}</h3>
+                        <div style='display: flex; justify-content: flex-start; font-size: 16px; color: #333; flex-wrap: wrap; gap: 20px;'>
+                            <span><b style='color: #1E3A8D;'>🔹 نوع:</b> {e_type}</span>
+                            <span><b style='color: #1E3A8D;'>🔹 دور:</b> {get_val_safe(['دور'])} RPM</span>
+                            <span><b style='color: #1E3A8D;'>🔹 واحد:</b> {get_val_safe(['واحد'])}</span>
                         </div>
-                        ''', unsafe_allow_html=True)
-
-                        # بخش لجستیک
-                        pts = smart_find_column(df_assets.columns, ['نقطه'])
-                        brg = smart_find_column(df_assets.columns, ['بیرینگ'])
-                        bsh = smart_find_column(df_assets.columns, ['بوش'])
-                        cols_to_show = [c for c in [pts, brg, bsh] if c is not None]
-                        if cols_to_show:
-                            logistics = asset_rows[cols_to_show].copy()
-                            logistics = logistics.replace(['nan', 'None', ''], '---').fillna('---')
-                            rename_map = {pts: 'نقطه', brg: 'شماره بیرینگ', bsh: 'شماره بوش'}
-                            logistics = logistics.rename(columns=rename_map)
-                            with st.expander('📦 اطلاعات لجستیکی و قطعات', expanded=True):
-                                st.dataframe(logistics, hide_index=True, use_container_width=True)
-
-        # --- نمایش جدول ارتعاشات ---
+                        <div style='margin-top: 12px; font-size: 15px; color: #1E3A8D; background: #e6efff; padding: 8px 15px; border-radius: 8px; display: inline-block;'>
+                            <b style='color: #1E3A8D;'>📍 راهنمای نقاط (P-Map):</b> {get_point_guide(selected_equipment, e_type)}
+                        </div>
+                    </div>
+                    ''', unsafe_allow_html=True)
+                    pts, brg, bsh = smart_find_column(df_assets.columns, ['نقطه']), smart_find_column(df_assets.columns, ['بیرینگ']), smart_find_column(df_assets.columns, ['بوش'])
+                    cols = [c for c in [pts, brg, bsh] if c is not None]
+                    if cols:
+                        logistics = asset_rows[cols].copy().replace(['nan', 'None', ''], '---').fillna('---')
+                        logistics = logistics.rename(columns={pts: 'نقطه', brg: 'شماره بیرینگ', bsh: 'شماره بوش'})
+                        with st.expander('📦 اطلاعات لجستیکی و قطعات', expanded=True):
+                            st.dataframe(logistics, hide_index=True, use_container_width=True)
         st.markdown(f"### 📋 نتایج یافت شده ({len(filtered_df)} مورد)")
-        
-        def color_vibration_cells(val):
+        def color_vib(val):
             try:
-                v = float(str(val).replace(',', '.')) 
+                v = float(str(val).replace(',', '.'))
                 if v > 7.1: return 'background-color: #ff4b4b; color: white'
                 elif v > 4.5: return 'background-color: #ffa500; color: white'
                 else: return 'background-color: #2e7d32; color: white'
             except: return ''
-
         vib_cols = [c for c in filtered_df.columns if any(k in str(c) for k in ['عمودی', 'افقی', 'محوری'])]
         if vib_cols:
-            styled_df = filtered_df.style.map(color_vibration_cells, subset=vib_cols)
-            st.dataframe(styled_df, use_container_width=True)
+            st.dataframe(filtered_df.style.map(color_vib, subset=vib_cols), use_container_width=True)
         else:
             st.dataframe(filtered_df, use_container_width=True)
-
     else:
         st.warning("⚠️ هیچ داده‌ای با این فیلترها پیدا نشد.")
-
-    # امضای نهایی
-    st.markdown('<div style="text-align:center; margin-top:40px; font-weight:bold; color: #555; font-family: Tahoma;">طراحی و توسعه: مهندس هادی زندیه | شرکت فاز فیدار پارسیان</div>', unsafe_allow_html=True)
-
-else:
-    st.error("❌ خطا در دریافت داده‌ها. لطفاً اتصال اینترنت و لینک گوگل‌شیت را بررسی کنید.")
-
-
-### ⚠️ برای رفع ارور SyntaxError حتماً این ۳ نکته را رعایت کن:
-                         
+    st.markdown('<div style="text-align:center; margin-top:60px; font-weight:bold; color: #555; font-family: Tahoma;">طراحی و توسعه: مهندس هادی زندیه | شرکت فاز فیدار پارسیان</div>', unsafe_allow_html=True)
+                        
 
 
