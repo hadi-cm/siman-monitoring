@@ -85,100 +85,103 @@ st.markdown(f'''
         <img src='data:image/png;base64,{logo_siman_base64}' style='width: 110px; height: auto;'>
     </div>
     ''', unsafe_allow_html=True)
+
 # ==============================================================================
-# 4. بارگذاری داده‌ها
+# 4. بارگذاری داده‌ها (نسخه با عیب‌یابی دقیق)
 # ==============================================================================
-# نکته: اگر باز هم خطای 400 گرفتید، حتماً از گزینه Publish to Web در گوگل شیت استفاده کنید
 VIB_URL = 'https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=0'
 ASSETS_URL = 'https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=1'
 
-@st.cache_data(ttl=600) # کش کردن داده‌ها برای ۱۰ دقیقه جهت جلوگیری از درخواست‌های زیاد به گوگل
+@st.cache_data(ttl=600)
 def load_all_data():
     try:
         # تلاش برای خواندن دیتای ارتعاشات
         df_vib = pd.read_csv(VIB_URL)
+        if df_vib.empty:
+            st.error("⚠️ فایل ارتعاشات (VIB) خوانده شد اما خالی است!")
+            return pd.DataFrame(), pd.DataFrame()
         
-        # تبدیل تاریخ‌ها
-        date_col = smart_find_column(df_vib.columns, ['تاریخ', 'Date'])
-        if date_col:
-            df_vib[date_col] = pd.to_datetime(df_vib[date_col], errors='coerce')
-            
         # تلاش برای خواندن دیتای Assets
         try:
             df_assets = pd.read_csv(ASSETS_URL)
-        except:
-            df_assets = pd.DataFrame() # اگر شیت دوم وجود نداشت، برنامه متوقف نشود
+        except Exception as e:
+            st.warning(f"⚠️ فایل Assets یافت نشد یا خطا دارد: {e}")
+            df_assets = pd.DataFrame()
+
+        # تبدیل تاریخ‌ها در دیتای ارتعاشات
+        date_col = smart_find_column(df_vib.columns, ['تاریخ', 'Date'])
+        if date_col:
+            df_vib[date_col] = pd.to_datetime(df_vib[date_col], errors='coerce')
+        else:
+            st.error("❌ ستون 'تاریخ' در فایل ارتعاشات پیدا نشد!")
             
         return df_vib, df_assets
-        
     except Exception as e:
-        # نمایش خطای دقیق برای عیب‌یابی
-        st.error(f"❌ خطا در دریافت داده‌ها از گوگل شیت.")
-        st.info(f"🔍 علت فنی خطا: {e}")
-        st.warning("💡 پیشنهاد: اگر خطای 400 دریافت می‌کنید، در گوگل شیت گزینه 'Publish to Web' را فعال کرده و لینک CSV جدید را جایگزین کنید.")
+        st.error(f"❌ خطا در اتصال به گوگل شیت: {e}")
         return pd.DataFrame(), pd.DataFrame()
+
 df, df_assets = load_all_data()
+
+# نمایش اطلاعات برای عیب‌یابی (فقط اگر دیتای اصلی خالی باشد)
+if df.empty:
+    st.error("🚨 دیتای اصلی بارگذاری نشد. لطفاً لینک گوگل شیت را چک کنید.")
+    st.stop()
+else:
+    st.success(f"✅ با موفقیت {len(df)} ردیف داده بارگذاری شد.")
+
 # ==============================================================================
-# 5. فیلترهای پیشرفته (سایدبار) - نسخه سلسله‌مراتبی و هوشمند
+# 5. فیلترهای پیشرفته (سایدبار)
 # ==============================================================================
 st.sidebar.header("🔍 فیلترهای پیشرفته")
 
-if not df.empty:
-    # شناسایی ستون‌ها
-    col_line = smart_find_column(df.columns, ['خط تولید', 'خط'])
-    col_unit = smart_find_column(df.columns, ['واحد'])
-    equip_col = smart_find_column(df.columns, ['تجهیز', 'Equipment', 'Asset', 'عنوان تجهیز', 'نام تجهیز'])
-    date_col = smart_find_column(df.columns, ['تاریخ', 'Date'])
+# شناسایی ستون‌ها (بسیار مهم برای فیلترها)
+col_line = smart_find_column(df.columns, ['خط تولید', 'خط'])
+col_unit = smart_find_column(df.columns, ['واحد'])
+equip_col = smart_find_column(df.columns, ['تجهیز', 'Equipment', 'Asset', 'عنوان تجهیز', 'نام تجهیز'])
+date_col = smart_find_column(df.columns, ['تاریخ', 'Date'])
 
-    # --- گام اول: انتخاب خط تولید ---
-    if col_line:
-        lines = sorted([str(v) for v in df[col_line].unique() if pd.notna(v)])
-        sel_line = st.sidebar.selectbox("📍 خط تولید:", ["همه"] + lines)
-    else:
-        sel_line = "همه"
+# ۱. انتخاب خط تولید
+if col_line:
+    lines = sorted([str(v) for v in df[col_line].unique() if pd.notna(v)])
+    sel_line = st.sidebar.selectbox("📍 خط تولید:", ["همه"] + lines)
+else:
+    sel_line = "همه"
 
-    # --- گام دوم: انتخاب واحد (وابسته به خط تولید) ---
-    if col_unit:
-        # فیلتر کردن لیست واحدها بر اساس خط تولید انتخاب شده
-        unit_df = df.copy()
-        if sel_line != "همه" and col_line:
-            unit_df = unit_df[unit_df[col_line].astype(str) == sel_line]
-        
-        units = sorted([str(v) for v in unit_df[col_unit].unique() if pd.notna(v)])
-        sel_unit = st.sidebar.selectbox("🏢 واحد:", ["همه"] + units)
-    else:
-        sel_unit = "همه"
+# ۲. انتخاب واحد (وابسته به خط)
+if col_unit:
+    unit_df = df.copy()
+    if sel_line != "همه" and col_line:
+        unit_df = unit_df[unit_df[col_line].astype(str) == sel_line]
+    units = sorted([str(v) for v in unit_df[col_unit].unique() if pd.notna(v)])
+    sel_unit = st.sidebar.selectbox("🏢 واحد:", ["همه"] + units)
+else:
+    sel_unit = "همه"
 
-    # --- گام سوم: انتخاب تجهیز (وابسته به خط و واحد) ---
-    if equip_col:
-        # فیلتر کردن لیست تجهیزات بر اساس خط و واحد انتخاب شده
-        eq_df = df.copy()
-        if sel_line != "همه" and col_line:
-            eq_df = eq_df[eq_df[col_line].astype(str) == sel_line]
-        if sel_unit != "همه" and col_unit:
-            eq_df = eq_df[eq_df[col_unit].astype(str) == sel_unit]
-        
-        equipment_list = sorted([str(v) for v in eq_df[equip_col].unique() if pd.notna(v) and str(v).strip() != ''])
-        selected_equipment = st.sidebar.selectbox("⚙️ انتخاب تجهیز:", ["همه تجهیزات"] + equipment_list)
-    else:
-        selected_equipment = "همه تجهیزات"
-
-    # --- گام چهارم: بازه زمانی و ماه ---
-    today = datetime.date.today()
-    thirty_days_ago = today - datetime.timedelta(days=30)
+# ۳. انتخاب تجهیز (وابسته به خط و واحد)
+if equip_col:
+    eq_df = df.copy()
+    if sel_line != "همه" and col_line:
+        eq_df = eq_df[eq_df[col_line].astype(str) == sel_line]
+    if sel_unit != "همه" and col_unit:
+        eq_df = eq_df[eq_df[col_unit].astype(str) == sel_unit]
     
-    date_range_input = st.sidebar.date_input(
-        "📅 انتخاب بازه زمانی",
-        value=(thirty_days_ago, today),
-        format="YYYY/MM/DD"
-    )
+    equipment_list = sorted([str(v) for v in eq_df[equip_col].unique() if pd.notna(v) and str(v).strip() != ''])
+    selected_equipment = st.sidebar.selectbox("⚙️ انتخاب تجهیز:", ["همه تجهیزات"] + equipment_list)
+else:
+    selected_equipment = "همه تجهیزات"
 
-    if date_col:
-        temp_dates = pd.to_datetime(df[date_col], errors='coerce')
-        all_months = sorted(temp_dates.dt.strftime('%m-%Y').dropna().unique().tolist())
-        selected_month = st.sidebar.selectbox("🌙 انتخاب ماه و سال", ["همه ماه‌ها"] + all_months)
-    else:
-        selected_month = "همه ماه‌ها"
+# ۴. بازه زمانی
+today = datetime.date.today()
+thirty_days_ago = today - datetime.timedelta(days=30)
+date_range_input = st.sidebar.date_input("📅 انتخاب بازه زمانی", value=(thirty_days_ago, today), format="YYYY/MM/DD")
+
+# ۵. ماه و سال
+if date_col:
+    temp_dates = pd.to_datetime(df[date_col], errors='coerce')
+    all_months = sorted(temp_dates.dt.strftime('%m-%Y').dropna().unique().tolist())
+    selected_month = st.sidebar.selectbox("🌙 انتخاب ماه و سال", ["همه ماه‌ها"] + all_months)
+else:
+    selected_month = "همه ماه‌ها"
 
  # ==============================================================================
  # 6. منطق فیلتر کردن نهایی (اعمال تمام فیلترها روی دیتای اصلی)
