@@ -176,7 +176,6 @@ if not df.empty:
         # مرتب‌سازی بر اساس تاریخ (تبدیل به datetime برای مرتب‌سازی درست)
         filtered_df['temp_date_sort'] = pd.to_datetime(filtered_df[date_col], errors='coerce')
         filtered_df = filtered_df.sort_values(by='temp_date_sort', ascending=False).drop(columns=['temp_date_sort'])
-
     # ==============================================================================
     # 7. نمایش محتوا
     # ==============================================================================
