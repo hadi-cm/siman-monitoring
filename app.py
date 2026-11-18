@@ -310,7 +310,6 @@ if not df.empty:
             st.dataframe(fdf[visible_cols], use_container_width=True, hide_index=True)
 
 
-### 🛠️ چه تغیی
     else:
         st.warning("⚠️ داده‌ای یافت نشد.")
 
