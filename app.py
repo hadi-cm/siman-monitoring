@@ -119,33 +119,60 @@ def load_all_data():
         return pd.DataFrame(), pd.DataFrame()
 df, df_assets = load_all_data()
 # ==============================================================================
-# 5. فیلترهای پیشرفته (سایدبار)
+# 5. فیلترهای پیشرفته (سایدبار) - نسخه سلسله‌مراتبی و هوشمند
 # ==============================================================================
 st.sidebar.header("🔍 فیلترهای پیشرفته")
 
 if not df.empty:
+    # شناسایی ستون‌ها
+    col_line = smart_find_column(df.columns, ['خط تولید', 'خط'])
+    col_unit = smart_find_column(df.columns, ['واحد'])
     equip_col = smart_find_column(df.columns, ['تجهیز', 'Equipment', 'Asset', 'عنوان تجهیز', 'نام تجهیز'])
     date_col = smart_find_column(df.columns, ['تاریخ', 'Date'])
 
-    # ۱. انتخاب تجهیز
+    # --- گام اول: انتخاب خط تولید ---
+    if col_line:
+        lines = sorted([str(v) for v in df[col_line].unique() if pd.notna(v)])
+        sel_line = st.sidebar.selectbox("📍 خط تولید:", ["همه"] + lines)
+    else:
+        sel_line = "همه"
+
+    # --- گام دوم: انتخاب واحد (وابسته به خط تولید) ---
+    if col_unit:
+        # فیلتر کردن لیست واحدها بر اساس خط تولید انتخاب شده
+        unit_df = df.copy()
+        if sel_line != "همه" and col_line:
+            unit_df = unit_df[unit_df[col_line].astype(str) == sel_line]
+        
+        units = sorted([str(v) for v in unit_df[col_unit].unique() if pd.notna(v)])
+        sel_unit = st.sidebar.selectbox("🏢 واحد:", ["همه"] + units)
+    else:
+        sel_unit = "همه"
+
+    # --- گام سوم: انتخاب تجهیز (وابسته به خط و واحد) ---
     if equip_col:
-        equipment_list = sorted([str(v) for v in df[equip_col].unique() if pd.notna(v) and str(v).strip() != ''])
-        selected_equipment = st.sidebar.selectbox("⚙️ انتخاب تجهیز", ["همه تجهیزات"] + equipment_list)
+        # فیلتر کردن لیست تجهیزات بر اساس خط و واحد انتخاب شده
+        eq_df = df.copy()
+        if sel_line != "همه" and col_line:
+            eq_df = eq_df[eq_df[col_line].astype(str) == sel_line]
+        if sel_unit != "همه" and col_unit:
+            eq_df = eq_df[eq_df[col_unit].astype(str) == sel_unit]
+        
+        equipment_list = sorted([str(v) for v in eq_df[equip_col].unique() if pd.notna(v) and str(v).strip() != ''])
+        selected_equipment = st.sidebar.selectbox("⚙️ انتخاب تجهیز:", ["همه تجهیزات"] + equipment_list)
     else:
         selected_equipment = "همه تجهیزات"
 
-    # ۲. فیلتر بازه زمانی (نسخه فوق‌محافظت شده برای Streamlit Cloud)
+    # --- گام چهارم: بازه زمانی و ماه ---
     today = datetime.date.today()
     thirty_days_ago = today - datetime.timedelta(days=30)
     
-    # استفاده از یک متغیر برای ذخیره مقدار انتخابی کاربر
     date_range_input = st.sidebar.date_input(
         "📅 انتخاب بازه زمانی",
         value=(thirty_days_ago, today),
         format="YYYY/MM/DD"
     )
 
-    # ۳. فیلتر ماه و سال
     if date_col:
         temp_dates = pd.to_datetime(df[date_col], errors='coerce')
         all_months = sorted(temp_dates.dt.strftime('%m-%Y').dropna().unique().tolist())
@@ -153,41 +180,46 @@ if not df.empty:
     else:
         selected_month = "همه ماه‌ها"
 
-    # ==============================================================================
-    # 6. منطق فیلتر کردن (نسخه هوشمند با پشتیبانی از تاریخ)
-    # ==============================================================================
+ # ==============================================================================
+ # 6. منطق فیلتر کردن نهایی (اعمال تمام فیلترها روی دیتای اصلی)
+ # ==============================================================================
     filtered_df = df.copy()
 
-    # ۱. فیلتر تجهیز
-    if selected_equipment != "همه تجهیزات" and equip_col:
-        filtered_df = filtered_df[filtered_df[equip_col].astype(str).str.strip() == str(selected_equipment).strip()]
+    # ۱. اعمال فیلتر خط تولید
+    if sel_line != "همه" and col_line:
+        filtered_df = filtered_df[filtered_df[col_line].astype(str) == sel_line]
 
-    # ۲. فیلتر تاریخ (با مدیریت تبدیل تاریخ)
+    # ۲. اعمال فیلتر واحد
+    if sel_unit != "همه" and col_unit:
+        filtered_df = filtered_df[filtered_df[col_unit].astype(str) == sel_unit]
+
+    # ۳. اعمال فیلتر تجهیز
+    if selected_equipment != "همه تجهیزات" and equip_col:
+        filtered_df = filtered_df[filtered_df[equip_col].astype(str) == selected_equipment]
+
+    # ۴. اعمال فیلتر بازه زمانی
     if date_col:
-        # تبدیل ستون تاریخ به datetime (اگر شمسی باشد، خطا می‌گیرد و NaT می‌شود)
-        temp_date_series = pd.to_datetime(filtered_df[date_col], errors='coerce')
-        
-        # الف) فیلتر بازه زمانی
         if isinstance(date_range_input, tuple) and len(date_range_input) == 2:
             start_date, end_date = date_range_input
             if start_date is not None and end_date is not None:
-                # فیلتر کردن بر اساس تاریخ‌های معتبر میلادی
+                temp_date_series = pd.to_datetime(filtered_df[date_col], errors='coerce')
                 mask = (temp_date_series.dt.date >= start_date) & (temp_date_series.dt.date <= end_date)
                 filtered_df = filtered_df[mask]
 
-        # ب) فیلتر ماه و سال
-        if selected_month != "همه ماه‌ها":
-            # استفاده از ستون کمکی برای ماه (بدون توجه به شمسی یا میلادی بودن در مرحله اول)
-            mask_month = (temp_date_series.dt.strftime('%m-%Y') == selected_month)
-            filtered_df = filtered_df[mask_month]
+    # ۵. اعمال فیلتر ماه
+    if selected_month != "همه ماه‌ها" and date_col:
+        temp_date_series = pd.to_datetime(filtered_df[date_col], errors='coerce')
+        mask_month = (temp_date_series.dt.strftime('%m-%Y') == selected_month)
+        filtered_df = filtered_df[mask_month]
 
-    # ۳. مرتب‌سازی نهایی
+    # مرتب‌سازی نهایی (جدیدترین در بالا)
     if date_col:
         filtered_df['temp_date_sort'] = pd.to_datetime(filtered_df[date_col], errors='coerce')
         filtered_df = filtered_df.sort_values(by='temp_date_sort', ascending=False).drop(columns=['temp_date_sort'])
 
-    # 7. نمایش محتوا
-    # ==============================================================================
+  # ==============================================================================
+  # 7. نمایش محتوا
+  # ==============================================================================
     st.title("📊 تحلیل روند ارتعاشات تجهیزات")
     if selected_equipment != "همه تجهیزات":
         # --- نمایش مشخصات فنی از df_assets ---
