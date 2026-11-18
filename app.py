@@ -285,20 +285,32 @@ if not df.empty:
                              color_discrete_map={'سالم':'#2e7d32', 'هشدار':'#ffa500', 'بحرانی':'#ff4b4b', 'نامشخص':'#9e9e9e'})
                 st.plotly_chart(fig, use_container_width=True)
 
-        # جدول
-        st.markdown(f"### 📋 نتایج ({len(fdf)} مورد)")
-        def color_v(val):
+        # ------------------ جدول نتایج ------------------
+        st.markdown(f"### 📋 نتایج یافت شده ({len(fdf)} مورد)")
+
+        def color_vib(val):
             try:
                 v = float(str(val).replace('٫', '.').replace(',', '.').strip())
-                if v > 7.1: return 'background-color:#ff4b4b; color:white'
-                if v > 4.5: return 'background-color:#ffa500; color:white'
-                return 'background-color:#2e7d32; color:white'
+                if v > 7.1: return 'background-color: #ff4b4b; color: white'
+                elif v > 4.5: return 'background-color: #ffa500; color: white'
+                else: return 'background-color: #2e7d32; color: white'
             except: return ''
 
+        # --- اصلاح اصلی: حذف ستون‌های مخفی از نمایش ---
+        # تمام ستون‌هایی که با '_k_' شروع می‌شوند را از لیست ستون‌های نمایشی حذف می‌کنیم
+        visible_cols = [c for c in fdf.columns if not str(c).startswith('_k_')]
+        
+        vib_cols = [c for c in visible_cols if any(k in str(c) for k in ['عمودی', 'افقی', 'محوری'])]
+
         if vib_cols:
-            st.dataframe(fdf.style.map(color_v, subset=vib_cols), use_container_width=True, hide_index=True)
+            # اعمال رنگ فقط روی ستون‌های ارتعاشات
+            styled_df = fdf[visible_cols].style.map(color_vib, subset=vib_cols)
+            st.dataframe(styled_df, use_container_width=True, hide_index=True)
         else:
-            st.dataframe(fdf, use_container_width=True, hide_index=True)
+            st.dataframe(fdf[visible_cols], use_container_width=True, hide_index=True)
+
+
+### 🛠️ چه تغیی
     else:
         st.warning("⚠️ داده‌ای یافت نشد.")
 
