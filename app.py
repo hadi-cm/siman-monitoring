@@ -1,9 +1,9 @@
+python
 import re
 import pandas as pd
 import streamlit as st
 import base64
 import plotly.express as px
-from datetime import datetime
 # ==============================================================================
 # 0. تنظیمات صفحه
 # ==============================================================================
@@ -42,13 +42,13 @@ def check_password():
 if not check_password():
     st.stop()
 # ==============================================================================
-# 2. توابع کمکی
+# 2. توابع کمکی و اصلاح شده (Fixing Syntax Error)
 # ==============================================================================
 FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹'
 AR_DIGITS = '٠١٢٣٤٥٦٧٨٩'
 EN_DIGITS = '0123456789'
 def norm(x):
-    if x is None: return ''
+    if x is None or str(x).strip() == '': return ''
     s = str(x).strip()
     for f, e in zip(FA_DIGITS, EN_DIGITS): s = s.replace(f, e)
     for a, e in zip(AR_DIGITS, EN_DIGITS): s = s.replace(a, e)
@@ -66,6 +66,18 @@ def to_num(series):
     s = series.map(clean_num_text)
     s = s.replace({'': None, 'nan': None, 'None': None, '---': None, 'NaN': None})
     return pd.to_numeric(s, errors='coerce')
+def date_sort_key(val):
+    s = norm(val)
+    m = re.search(r'(\d{2,4})\s*/\s*(\d{1,2})\s*/\s*(\d{1,2})', s)
+    if m:
+        try:
+            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            if y < 100: y += 1400
+            return (y  10000) + (mo  100) + d
+        except: return 0
+    m = re.search(r'(\d{6,8})', s)
+    if m: return int(m.group(1))
+    return 0
 def get_image_base64(path):
     try:
         with open(path, 'rb') as f:
@@ -78,22 +90,8 @@ def smart_find_column(columns, keywords):
     for k in keywords:
         nk = norm(k)
         for c in cols:
-            if normed[c] == nk: return c
-    for k in keywords:
-        nk = norm(k)
-        for c in cols:
-            if nk and nk in normed[c]: return c
+            if normed[c] == nk or (nk != '' and nk in normed[c]): return c
     return None
-def date_sort_key(val):
-    s = norm(val)
-    m = re.search(r'(\d{2,4})\s*/\s*(\d{1,2})\s*/\s*(\d{1,2})', s)
-    if m:
-        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        if y < 100: y += 1400
-        return y  10000 + mo  100 + d
-    m = re.search(r'(\d{6,8})', s)
-    if m: return int(m.group(1))
-    return 0
 def get_point_guide(eq_name, eq_type=''):
     name = norm(eq_name) + ' ' + norm(eq_type)
     if 'گیربکس' in name:
@@ -102,87 +100,90 @@ def get_point_guide(eq_name, eq_type=''):
                 'P7: سمت فیکس محور سوم | P8: سمت آزاد محور سوم | P9: بابیت اول سمت گیربکس | '
                 'P10: بابیت دوم | P11: بابیت نزدیک پینیون آسیاب')
     if 'کراشر' in name or 'سنگ شکن' in name:
-        return ('P1: انتهای موتور | P2: سر موتور | P3: یاتاقان سمت فیکس | P4: یاتاقان سمت آزاد | P5: یاتاقان فیکس | P6: یاتاقان آزاد')
+        return ('P1: انتهای موتور | P2: سر موتور | P3: یاتاقان سمت فیکس | '
+                'P4: یاتاقان سمت آزاد | P5: یاتاقان فیکس | P6: یاتاقان آزاد')
     if 'فن' in name:
         return 'P1: انتهای موتور | P2: سر موتور | P3: یاتاقان فیکس | P4: یاتاقان آزاد'
     if 'بلوئر' in name:
         return 'P1: انتهای موتور | P2: سر موتور | P3: محور ورود بلوئر | P4: انتهای بلوئر'
-    if 'کمپرسور' in name:
-        return 'P1: انتهای موتور | P2: سر موتور | P3: سر ایرند | P4: انتهای ایرند'
     return 'راهنمای نقاط تعریف نشده است.'
 # ==============================================================================
-# 3. بارگذاری و پردازش اصلی (Pivot Strategy)
+# 3. بارگذاری و پردازش Pivot (اصلی‌ترین بخش برای حل مشکل تو)
 # ==============================================================================
 VIB_URL = 'https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=0'
 ASSETS_URL = 'https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=1276803564'
 ANN_URL = 'https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=2057447521'
 @st.cache_data(ttl=600)
-def load_and_pivot_data():
-    try: df_vib_raw = pd.read_csv(VIB_URL, dtype=str, keep_default_na=False, encoding='utf-8-sig')
-    except: df_vib_raw = pd.DataFrame()
+def load_processed_data():
+    try: df_vib = pd.read_csv(VIB_URL, dtype=str, keep_default_na=False, encoding='utf-8-sig')
+    except: df_vib = pd.DataFrame()
     try: df_assets = pd.read_csv(ASSETS_URL, dtype=str, keep_default_na=False, encoding='utf-8-sig')
     except: df_assets = pd.DataFrame()
     try: df_ann = pd.read_csv(ANN_URL, dtype=str, keep_default_na=False, encoding='utf-8-sig')
     except: df_ann = pd.DataFrame()
-    if df_vib_raw.empty:
-        return df_vib_raw, df_assets, df_ann
-    # شناسایی ستون‌های کلیدی
-    c_date = smart_find_column(df_vib_raw.columns, ['تاریخ', 'Date'])
-    c_line = smart_find_column(df_vib_raw.columns, ['خط تولید', 'خط'])
-    c_unit = smart_find_column(df_vib_raw.columns, ['واحد'])
-    c_equip = smart_find_column(df_vib_raw.columns, ['عنوان تجهیز', 'نام تجهیز', 'تجهیز', 'Asset'])
-    c_point = smart_find_column(df_vib_raw.columns, ['p', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', 'p11'])
-    # ستون‌های مقداری (مثل عمودی، افقی، محوری)
-    val_cols = [c for c in df_vib_raw.columns if any(k in c.lower() for k in ['عمودی', 'افقی', 'محوری', 'v', 'h', 'a'])]
-    # تمام ستون‌های غیر مقداری که باید در ردیف اول پر باشند (برای انتشار در تمام ردیف‌ها)
-    info_cols = [c for c in df_vib_raw.columns if c not in val_cols and c != c_point and c != c_date and c != c_line and c != c_unit and c != c_equip]
-    # ۱. تمیز کردن داده‌ها (Fill info cols forward)
-    # چون در شیت شما فقط ردیف اول پر است، از ffill استفاده می‌کنیم تا به ردیف‌های p1, p2... برسد
-    df_vib_raw[c_line] = df_vib_raw[c_line].replace('', None).ffill()
-    df_vib_raw[c_unit] = df_vib_raw[c_unit].replace('', None).ffill()
-    df_vib_raw[c_equip] = df_vib_raw[c_equip].replace('', None).ffill()
-    if c_date: df_vib_raw[c_date] = df_vib_raw[c_date].replace('', None).ffill()
-    for col in info_cols:
-        df_vib_raw[col] = df_vib_raw[col].replace('', None).ffill()
-    # ۲. ساخت کلید اصلی برای ادغام (تجهیز + تاریخ)
-    df_vib_raw['_grp_key'] = df_vib_raw[c_equip].map(norm) + "|" + df_vib_raw[c_date].map(norm)
-    # ۳. پیوت کردن: تبدیل از Long به Wide
-    # ما می‌خواهیم هر تجهیز در یک تاریخ، یک ردیف باشد و ستون‌های P1, P2... داشته باشد
-    # ابتدا ستون‌های مقداری را هم باید مدیریت کنیم. اگر در شیت شما هر ردیف فقط یک P دارد،
-    # یعنی مقادیر در ستون‌های عمودی/افقی قرار دارند.
-    # ایجاد یک لیست از تمام ستون‌های مقداری که می‌خواهیم در Wide حالت داشته باشیم
-    # برای سادگی، فرض می‌کنیم در هر ردیف فقط یک نقطه (p) پر است.
-    # استراتژی: Groupby بر اساس تجهیز و تاریخ، و سپس Pivot کردن ستون p
-    pivot_df = df_vib_raw.pivot_table(
-        index=['_grp_key', c_line, c_unit, c_equip, c_date],
-        columns=c_point,
-        values=val_cols if val_cols else [c_point], # اگر ستون مقداری نبود، همان p را بگیرد
-        aggfunc='first'
-    ).reset_index()
-    # پاکسازی نام ستون‌ها بعد از Pivot (نام ستون‌ها تبدیل به Tuple شده)
-    pivot_df.columns = [c[0] if isinstance(c, tuple) else c for c in pivot_df.columns]
-    # رفع مشکل ستون‌های خالی و نام‌های عجیب
-    pivot_df = pivot_df.replace('', None).fillna('')
-    # مرتب سازی ستون‌های P به ترتیب عددی
-    def get_p_order(col_name):
-        m = re.search(r'p(\d+)', str(col_name).lower())
-        return int(m.group(1)) if m else 999
-    p_cols_found = [c for c in pivot_df.columns if re.search(r'p\d+', str(c).lower())]
-    other_cols = [c for c in pivot_df.columns if c not in p_cols_found and not c.startswith('_')]
-    sorted_p_cols = sorted(p_cols_found, key=get_p_order)
-    final_cols = other_cols + sorted_p_cols
-    # بازگرداندن دیتافریم نهایی
-    df_final = pivot_df[final_cols]
-    # اضافه کردن کلیدهای کمکی برای فیلتر
-    df_final['_k_line'] = df_final[c_line].map(norm)
-    df_final['_k_unit'] = df_final[c_unit].map(norm)
-    df_final['_k_eq'] = df_final[c_equip].map(norm)
-    df_final['_k_date'] = df_final[c_date].map(norm)
-    if c_date: df_final['_dkey'] = df_final[c_date].map(date_sort_key)
-    return df_final, df_assets, df_ann
-df, df_assets, df_ann = load_and_pivot_data()
+    if df_vib.empty: return df_vib, df_assets, df_ann
+    # شناسایی ستون‌ها بر اساس عکس تو
+    c_date = smart_find_column(df_vib.columns, ['تاریخ', 'Date'])
+    c_line = smart_find_column(df_vib.columns, ['خط تولید', 'خط'])
+    c_unit = smart_find_column(df_vib.columns, ['واحد'])
+    c_equip = smart_find_column(df_vib.columns, ['عنوان تجهیز', 'نام تجهیز', 'تجهیز', 'Asset'])
+    c_point = smart_find_column(df_vib.columns, ['p', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', 'p11'])
+    # ستون‌های مقداری (بعد از ستون نقطه)
+    val_cols = [c for c in df_vib.columns if any(k in c.lower() for k in ['عمودی', 'افقی', 'محوری', 'v', 'h', 'a', 'mm/s'])]
+    # ۱. پر کردن ستون‌های خالی (Forward Fill) برای اینکه اطلاعات تجهیز به تمام نقاط برسد
+    cols_to_ffill = [c_date, c_line, c_unit, c_equip]
+    for col in cols_to_ffill:
+        if col:
+            df_vib[col] = df_vib[col].replace('', None).ffill()
+    # ۲. ایجاد ستون‌های کمکی برای گروه‌بندی
+    df_vib['_k_equip'] = df_vib[c_equip].map(norm)
+    df_vib['_k_date'] = df_vib[c_date].map(norm)
+    df_vib['_dkey'] = df_vib[c_date].map(date_sort_key)
+    # ۳. اجرای عملیات Pivot (تبدیل Long به Wide)
+    # این کار باعث می‌شود P1 تا P11 در یک ردیف کنار هم قرار بگیرند
+    pivot_idx = [c for c in [c_date, c_line, c_unit, c_equip] if c]
+    pivot_idx.append('_dkey')
+    # اگر ستون مقداری پیدا نشد، از خود ستون نقطه استفاده کن
+    vals = val_cols if val_cols else [c_point]
+    try:
+        df_pivoted = df_vib.pivot_table(
+            index=pivot_idx,
+            columns=c_point,
+            values=vals,
+            aggfunc='first'
+        ).reset_index()
+        # تمیز کردن نام ستون‌ها (در حالت Pivot ستون‌ها Tuple می‌شوند)
+        new_cols = []
+        for col in df_pivoted.columns:
+            if isinstance(col, tuple):
+                new_cols.append(col[0])
+            else:
+                new_cols.append(col)
+        df_pivoted.columns = new_cols
+        # حذف ستون‌های اضافی
+        cols_to_keep = [c for c in df_pivoted.columns if not c.startswith('_')]
+        df_pivoted = df_pivoted[cols_to_keep]
+        # اضافه کردن مجدد کلیدهای کمکی برای فیلترها
+        if c_line: df_pivoted['_k_line'] = df_pivoted[c_line].map(norm)
+        if c_unit: df_pivoted['_k_unit'] = df_pivoted[c_unit].map(norm)
+        if c_equip: df_pivoted['_k_eq'] = df_pivoted[c_equip].map(norm)
+        if c_date: df_pivoted['_k_date'] = df_pivoted[c_date].map(norm)
+        if c_date: df_pivoted['_dkey'] = df_pivoted['_dkey'] # حفظ ترتیب زمانی
+        # مرتب‌سازی ستون‌های P به ترتیب عددی (P1, P2, ... P11)
+        p_cols_found = [c for c in df_pivoted.columns if re.search(r'p\d+', str(c).lower())]
+        def get_p_num(name):
+            m = re.search(r'p(\d+)', str(name).lower())
+            return int(m.group(1)) if m else 999
+        other_cols = [c for c in df_pivoted.columns if c not in p_cols_found and not str(c).startswith('_')]
+        sorted_p_cols = sorted(p_cols_found, key=get_p_num)
+        df_pivoted = df_pivoted[other_cols + sorted_p_cols]
+    except Exception as e:
+        st.error(f"خطا در پردازش Pivot: {e}")
+        df_pivoted = df_vib
+    return df_pivoted, df_assets, df_ann
+df, df_assets, df_ann = load_processed_data()
 # ==============================================================================
-# 4. هدر و اعلان‌ها
+# 4. نمایش اعلان‌ها (Announcements)
 # ==============================================================================
 logo_siman = get_image_base64('client_logo.png')
 logo_faz = get_image_base64('my_logo.png')
@@ -193,130 +194,89 @@ st.markdown(f'''
     <img src='data:image/png;base64,{logo_faz}' style='width:110px; height:auto;'>
     <div style='text-align:center; color:#1E3A8D; font-size:26px; font-weight:bold; font-family:Tahoma;'>
         🛠️ سامانه پایش وضعیت تجهیزات سیمان تهران
-    </div>
+    </div >
     <img src='data:image/png;base64,{logo_siman}' style='width:110px; height:auto;'>
-</div>
+</div >
 ''', unsafe_allow_html=True)
 if not df_ann.empty:
-    col_title = smart_find_column(df_ann.columns, ['عنوان'])
-    col_text = smart_find_column(df_ann.columns, ['متن'])
-    col_type = smart_find_column(df_ann.columns, ['نوع'])
-    col_active = smart_find_column(df_ann.columns, ['فعال'])
-    col_label = smart_find_column(df_ann.columns, ['برچسب'])
-    if col_title and col_text and col_type:
-        if col_active:
-            df_ann = df_ann[df_ann[col_active].astype(str).str.strip() == 'بله']
+    c_tit = smart_find_column(df_ann.columns, ['عنوان'])
+    c_txt = smart_find_column(df_ann.columns, ['متن'])
+    c_typ = smart_find_column(df_ann.columns, ['نوع'])
+    c_act = smart_find_column(df_ann.columns, ['فعال'])
+    if c_tit and c_txt and c_typ:
+        if c_act:
+            df_ann = df_ann[df_ann[c_act].astype(str).str.strip() == 'بله']
         for _, row in df_ann.iterrows():
-            ann_type, ann_title, ann_msg = str(row[col_type]), str(row[col_title]), str(row[col_text])
-            ann_label = str(row[col_label]) if col_label else ""
-            if "خطر" in ann_type or "بحرانی" in ann_type: color, icon = "#ff4b4b", "🚨"
-            elif "هشدار" in ann_type: color, icon = "#ffaa00", "⚠️"
-            elif any(x in ann_type for x in ["اطلاعیه", "موفق", "گزارش"]): color, icon = "#2e7d32", "✅"
-            else: color, icon = "#1E3A8D", "ℹ️"
+            t, txt, typ = str(row[c_tit]), str(row[c_txt]), str(row[c_typ])
+            if any(x in typ for x in ["خطر", "بحرانی"]): color, icon = "#ff4b4b", "🚨"
+            elif "هشدار" in typ: color, icon = "#ffaa00", "⚠️"
+            else: color, icon = "#2e7d32", "✅"
             st.markdown(f'''
-            <div style='background:{color}; padding:15px; border-radius:10px; margin-bottom:10px; color:white; direction:rtl; text-align:right; font-family:Tahoma;'>
-                <div style='display:flex; justify-content:space-between; align-items:center;'>
-                    <b style='font-size:18px;'>{icon} {ann_title}</b>
-                    <span style='background:rgba(255,255,255,0.2); padding:2px 8px; border-radius:5px; font-size:12px;'>{ann_label}</span>
-                </div>
-                <div style='margin-top:5px; font-size:15px; opacity:0.9;'>{ann_msg}</div>
+            <div style='background:{color}; padding:12px; border-radius:10px; margin-bottom:8px; color:white; direction:rtl; text-align:right; font-family:Tahoma;'>
+                <b>{icon} {t}</b><br><small>{txt}</small>
             </div>
             ''', unsafe_allow_html=True)
 # ==============================================================================
-# 5. فیلترها و بدنه اصلی
+# 5. سایدبار و فیلترها
 # ==============================================================================
-st.sidebar.header('🔍 فیلترهای پیشرفته')
+st.sidebar.header('🔍 فیلترها')
 if not df.empty:
     c_line = smart_find_column(df.columns, ['خط تولید', 'خط'])
     c_unit = smart_find_column(df.columns, ['واحد'])
     c_equip = smart_find_column(df.columns, ['نام تجهیز', 'عنوان تجهیز', 'تجهیز', 'Asset'])
     c_date = smart_find_column(df.columns, ['تاریخ', 'Date'])
-    def _mode(series):
-        v = series.astype(str).str.strip()
-        v = v[v != '']
-        return v.value_counts().idxmax() if not v.empty else ''
-    def display_map(k_col, o_col):
-        if o_col is None: return {}
-        tmp = df[df[k_col] != '']
-        return tmp.groupby(k_col)[o_col].agg(_mode).to_dict() if not tmp.empty else {}
-    line_map = display_map('_k_line', c_line)
-    unit_map = display_map('_k_unit', c_unit)
-    eq_map = display_map('_k_eq', c_equip)
-    sel_line = st.sidebar.selectbox('📍 خط تولید:', ['همه'] + sorted(line_map.keys()), format_func=lambda k: 'همه' if k == 'همه' else line_map.get(k, k))
+    def get_map(k_col, o_col):
+        if not o_col: return {}
+        tmp = df[df[k_col] != ''].copy()
+        return tmp.groupby(k_col)[o_col].apply(lambda x: x.value_counts().index[0]).to_dict()
+    l_map = get_map('_k_line', c_line)
+    u_map = get_map('_k_unit', c_unit)
+    e_map = get_map('_k_eq', c_equip)
+    sel_line = st.sidebar.selectbox('📍 خط:', ['همه'] + sorted(l_map.keys()), format_func=lambda x: 'همه' if x=='همه' else l_map.get(x, x))
     tmp_u = df.copy()
     if sel_line != 'همه': tmp_u = tmp_u[tmp_u['_k_line'] == sel_line]
-    unit_keys = sorted([u for u in tmp_u['_k_unit'].unique() if u != ''])
-    sel_unit = st.sidebar.selectbox('🏢 واحد:', ['همه'] + unit_keys, format_func=lambda k: 'همه' if k == 'همه' else unit_map.get(k, k))
+    u_keys = sorted([u for u in tmp_u['_k_unit'].unique() if u != ''])
+    sel_unit = st.sidebar.selectbox('🏢 واحد:', ['همه'] + u_keys, format_func=lambda x: 'همه' if x=='همه' else u_map.get(x, x))
     if sel_unit != 'همه': tmp_u = tmp_u[tmp_u['_k_unit'] == sel_unit]
-    eq_keys = sorted([e for e in tmp_u['_k_eq'].unique() if e != ''])
-    sel_eq = st.sidebar.selectbox('⚙️ انتخاب تجهیز:', ['همه تجهیزات'] + eq_keys, format_func=lambda k: 'همه تجهیزات' if k == 'همه تجهیزات' else eq_map.get(k, k))
-    search_eq = st.sidebar.text_input('🔎 جستجوی سریع تجهیز:', placeholder='مثلاً: میل فن')
+    e_keys = sorted([e for e in tmp_u['_k_eq'].unique() if e != ''])
+    sel_eq = st.sidebar.selectbox('⚙️ تجهیز:', ['همه تجهیزات'] + e_keys, format_func=lambda x: 'همه تجهیزات' if x=='همه تجهیزات' else e_map.get(x, x))
+    search_eq = st.sidebar.text_input('🔎 جستجو:')
     date_map = {}
     if c_date:
-        tmp_d = df[df['_k_date'] != '']
-        date_map = tmp_d.groupby('_k_date')[c_date].agg(_mode).to_dict()
-    date_keys = sorted(list(date_map.keys()), reverse=True)
-    sel_date = st.sidebar.selectbox('🌙 انتخاب تاریخ:', ['همه تاریخ‌ها'] + date_keys, format_func=lambda k: 'همه تاریخ‌ها' if k == 'همه تاریخ‌ها' else date_map.get(k, k))
+        date_map = df.groupby('_k_date')[c_date].apply(lambda x: x.value_counts().index[0]).to_dict()
+    sel_date = st.sidebar.selectbox('🌙 تاریخ:', ['همه تاریخ‌ها'] + sorted(list(date_map.keys()), reverse=True), format_func=lambda x: 'همه تاریخ‌ها' if x=='همه تاریخ‌ها' else date_map.get(x, x))
+    # اعمال فیلترها
     fdf = df.copy()
     if sel_line != 'همه': fdf = fdf[fdf['_k_line'] == sel_line]
     if sel_unit != 'همه': fdf = fdf[fdf['_k_unit'] == sel_unit]
     if sel_eq != 'همه تجهیزات': fdf = fdf[fdf['_k_eq'] == sel_eq]
-    if search_eq.strip():
-        q = norm(search_eq)
-        fdf = fdf[fdf['_k_eq'].map(lambda v: q in v)]
+    if search_eq: fdf = fdf[fdf['_k_eq'].str.contains(norm(search_eq))]
     if sel_date != 'همه تاریخ‌ها': fdf = fdf[fdf['_k_date'] == sel_date]
-    if c_date: fdf = fdf.sort_values(by='_dkey', ascending=False)
-    # --- نمایش اصلی ---
-    st.title('📊 تحلیل روند ارتعاشات تجهیزات')
-    # شناسایی ستون‌های ارتعاش (P1, P2...)
-    p_cols = [c for c in fdf.columns if re.search(r'p\d+', str(c).lower())]
-    other_vis_cols = [c for c in fdf.columns if c not in p_cols and not c.startswith('_')]
+    if c_date: fdf = fdf.sort_values('_dkey', ascending=False)
+    # ==========================================================================
+    # 6. نمایش نتایج
+    # ==========================================================================
+    st.title('📊 تحلیل روند ارتعاشات')
     if sel_eq != 'همه تجهیزات':
-        # مشخصات فنی از Assets
-        eq_display = eq_map.get(sel_eq, sel_eq)
-        matched = False
+        # نمایش مشخصات فنی از Assets
         if not df_assets.empty:
             a_name = smart_find_column(df_assets.columns, ['نام تجهیز', 'عنوان تجهیز', 'Asset'])
             if a_name:
-                n_assets = df_assets[a_name].map(norm)
-                rows = df_assets[n_assets == sel_eq]
-                if rows.empty: rows = df_assets[n_assets.map(lambda x: sel_eq in x if x else '')]
-                if not rows.empty:
-                    matched = True
-                    r0 = rows.iloc[0]
-                    def gv(keys, default='---'):
-                        c = smart_find_column(df_assets.columns, keys)
-                        return str(r0[c]).strip() if c and str(r0[c]).strip() not in ('', 'nan', 'None') else default
-                    e_type, e_rpm, e_line, e_unit = gv(['نوع تجهیز', 'نوع']), gv(['دور', 'RPM']), gv(['خط']), gv(['واحد'])
-                    e_drive, e_brg, e_bush = gv(['نوع انتقال', 'کوپلینگ']), gv(['بیرینگ', 'Bearing']), gv(['بوش', 'Bush'])
-                    st.markdown(f'''
-                    <div style='background:#f0f7ff; padding:20px; border-radius:15px; border-right:10px solid #1E3A8D; margin-bottom:18px; text-align:right; direction:rtl; box-shadow:2px 2px 8px rgba(0,0,0,0.06);'>
-                        <h3 style='color:#1E3A8D; margin:0 0 14px 0; font-family:Tahoma;'>🛠️ مشخصات فنی: {eq_display}</h3>
-                        <div style='display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:10px; font-size:16px; color:#333; font-family:Tahoma;'>
-                            <span><b style='color:#1E3A8D;'>🔹 نوع:</b> {e_type}</span>
-                            <span><b style='color:#1E3A8D;'>🔹 دور:</b> {e_rpm} RPM</span>
-                            <span><b style='color:#1E3A8D;'>🔹 خط:</b> {e_line}</span>
-                            <span><b style='color:#1E3A8D;'>🔹 واحد:</b> {e_unit}</span>
-                            <span><b style='color:#1E3A8D;'>🔹 انتقال:</b> {e_drive}</span>
-                            <span><b style='color:#1E3A8D;'>🧩 بیرینگ:</b> {e_brg}</span>
-                            <span><b style='color:#1E3A8D;'>🧩 بوش:</b> {e_bush}</span>
-                        </div>
-                        <div style='margin-top:14px; font-size:15px; color:#1E3A8D; background:#e6efff; padding:8px 15px; border-radius:8px; display:inline-block; font-family:Tahoma;'>
-                            <b style='font-family:Tahoma;'>📍 راهنمای نقاط (P-Map):</b> {get_point_guide(eq_display, e_type)}
-                        </div>
-                    </div>
-                    ''', unsafe_allow_html=True)
-                    with st.expander('📦 اطلاعات قطعات و لجستیک', expanded=True):
-                        pts = smart_find_column(df_assets.columns, ['نقطه', 'Point'])
-                        brg = smart_find_column(df_assets.columns, ['بیرینگ', 'Bearing'])
-                        bsh = smart_find_column(df_assets.columns, ['بوش', 'Bush'])
-                        log_cols = [c for c in [pts, brg, bsh] if c]
-                        if log_cols:
-                            st.dataframe(rows[log_cols], hide_index=True, use_container_width=True)
-    if not matched: st.info('ℹ️ مشخصات فنی یافت نشد.')
+                # پیدا کردن ردیف تجهیز در Assets
+                asset_rows = df_assets[df_assets[a_name].map(norm) == sel_eq]
+                if not asset_rows.empty:
+                    r = asset_rows.iloc[0]
+                    def get_v(k):
+                        col = smart_find_column(df_assets.columns, k)
+                        return str(r[col]) if col and str(r[col]) != '' else '---'
+                    st.info(f"🛠️ مشخصات: {get_v(['نوع تجهیز', 'نوع'])} | {get_v(['دور', 'RPM'])} RPM | {get_v(['خط'])} | {get_v(['واحد'])}")
+                    st.caption(f"📍 راهنما: {get_point_guide(sel_eq, get_v(['نوع تجهیز', 'نوع']))}")
     if not fdf.empty:
-        st.markdown(f'### 📋 داده‌های ارتعاشات ({len(fdf)} مورد)')
-        def color_vib(val):
+        # تشخیص ستون‌های P
+        p_cols = [c for c in fdf.columns if re.search(r'p\d+', str(c).lower())]
+        disp_cols = [c for c in fdf.columns if c not in p_cols and not c.startswith('_')]
+        st.markdown(f"### 📋 داده‌های شناسایی شده ({len(fdf)} ردیف)")
+        def color_cells(val):
             try:
                 v = float(clean_num_text(val))
                 if v > 7.1: return 'background-color:#ff4b4b; color:white'
@@ -324,23 +284,22 @@ if not df.empty:
                 return 'background-color:#2e7d32; color:white'
             except: return ''
         if p_cols:
-            st.dataframe(fdf[other_vis_cols + p_cols].style.map(color_vib, subset=p_cols), use_container_width=True, hide_index=True)
+            st.dataframe(fdf[disp_cols + p_cols].style.map(color_cells, subset=p_cols), use_container_width=True, hide_index=True)
         else:
-            st.dataframe(fdf[other_vis_cols], use_container_width=True, hide_index=True)
-        if p_cols and sel_eq != 'همه تجهیزات' and c_date and len(fdf) > 1:
-            with st.expander('📈 نمودار روند ارتعاشات', expanded=False):
-                trend = fdf[[c_date] + p_cols].copy()
-                trend['_dkey'] = trend[c_date].map(date_sort_key)
-                trend = trend.sort_values('_dkey')
-                trend[c_date] = trend[c_date].astype(str)
-                long_df = trend.melt(id_vars=[c_date, '_dkey'], value_vars=p_cols, var_name='نقطه', value_name='ارتعاش')
-                long_df['ارتعاش'] = to_num(long_df['ارتعاش'])
-                long_df = long_df.dropna(subset=['ارتعاش'])
-                if not long_df.empty:
-                    fig = px.line(long_df, x=c_date, y='ارتعاش', color='نقطه', markers=True, title='روند ارتعاش (mm/s)')
-                    fig.add_hline(y=4.5, line_dash='dash', line_color='orange')
-                    fig.add_hline(y=7.1, line_dash='dash', line_color='red')
+            st.dataframe(fdf[disp_cols], use_container_width=True, hide_index=True)
+        # نمودار روند
+        if p_cols and len(fdf) > 1:
+            with st.expander("📈 نمودار روند نقاط", expanded=False):
+                trend_df = fdf[[c_date if c_date else fdf.columns[0]] + p_cols].copy()
+                # تبدیل به حالت Long برای Plotly
+                trend_df = trend_df.melt(id_vars=[trend_df.columns[0]], var_name='نقطه', value_name='مقدار')
+                trend_df['مقدار'] = to_num(trend_df['مقدار'])
+                trend_df = trend_df.dropna(subset=['مقدار'])
+                if not trend_df.empty:
+                    fig = px.line(trend_df, x=trend_df.columns[0], y='مقدار', color='نقطه', markers=True)
+                    fig.add_hline(y=4.5, line_dash="dash", line_color="orange")
+                    fig.add_hline(y=7.1, line_dash="dash", line_color="red")
                     st.plotly_chart(fig, use_container_width=True)
-    st.markdown('<div style="text-align:center; margin-top:50px; color:#555; font-family:Tahoma;">طراحی و توسعه: مهندس هادی زندیه | شرکت فاز فیدار پارسیان</div>', unsafe_allow_html=True)
+    st.markdown('<div style="text-align:center; margin-top:50px; color:#555; font-family:Tahoma;">طراحی و توسعه: مهندس هادی زندیه</div>', unsafe_allow_html=True)
 else:
-    st.error('❌ خطا در اتصال به منبع داده.')
+    st.error("داده‌ای یافت نشد.")
