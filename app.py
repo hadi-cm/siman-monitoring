@@ -23,16 +23,12 @@ USER_CREDENTIALS = {
     'masoud.sa.1989823@gmail.com': 'siman123',
 }
 
-
 def check_password():
     if 'authenticated' not in st.session_state:
         st.session_state['authenticated'] = False
-
     if not st.session_state['authenticated']:
-        st.markdown(
-            '<h2 style="text-align:center;">🔐 ورود به سامانه هوشمند پایش وضعیت سیمان تهران</h2>',
-            unsafe_allow_html=True
-        )
+        st.markdown('<h2 style="text-align:center;">🔐 ورود به سامانه هوشمند پایش وضعیت سیمان تهران</h2>',
+                    unsafe_allow_html=True)
         with st.form('login_form'):
             email = st.text_input('ایمیل کاربری:')
             password = st.text_input('رمز عبور:', type='password')
@@ -48,7 +44,6 @@ def check_password():
         return False
     return True
 
-
 if not check_password():
     st.stop()
 
@@ -59,46 +54,30 @@ FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹'
 AR_DIGITS = '٠١٢٣٤٥٦٧٨٩'
 EN_DIGITS = '0123456789'
 
-
 def norm(x):
-    """نرمال‌سازی کامل متن: اعداد فارسی/عربی، یکدست‌سازی ی/ک، حذف فاصله و نیم‌فاصله"""
-    if x is None:
-        return ''
+    if x is None: return ''
     try:
-        if isinstance(x, float) and pd.isna(x):
-            return ''
+        if isinstance(x, float) and pd.isna(x): return ''
     except Exception:
         pass
     s = str(x).strip()
-    for f, e in zip(FA_DIGITS, EN_DIGITS):
-        s = s.replace(f, e)
-    for a, e in zip(AR_DIGITS, EN_DIGITS):
-        s = s.replace(a, e)
-    s = (s.replace('ي', 'ی').replace('ى', 'ی')
-          .replace('ك', 'ک').replace('ۀ', 'ه').replace('ة', 'ه'))
-    s = s.replace('\u200c', ' ').replace('\xa0', ' ')
-    s = s.replace('-', ' ').replace('_', ' ').replace('.', ' ')
-    s = ' '.join(s.split()).lower()
-    return s
-
+    for f, e in zip(FA_DIGITS, EN_DIGITS): s = s.replace(f, e)
+    for a, e in zip(AR_DIGITS, EN_DIGITS): s = s.replace(a, e)
+    s = (s.replace('ي', 'ی').replace('ى', 'ی').replace('ك', 'ک').replace('ۀ', 'ه').replace('ة', 'ه'))
+    s = s.replace('\u200c', ' ').replace('\xa0', ' ').replace('-', ' ').replace('_', ' ').replace('.', ' ')
+    return ' '.join(s.split()).lower()
 
 def clean_num_text(x):
-    """پاک‌سازی متن عددی برای تبدیل به عدد"""
     s = str(x).strip()
-    for f, e in zip(FA_DIGITS, EN_DIGITS):
-        s = s.replace(f, e)
-    for a, e in zip(AR_DIGITS, EN_DIGITS):
-        s = s.replace(a, e)
-    s = s.replace('٫', '.').replace('،', '.').replace(',', '.')
-    s = s.replace(' ', '')
+    for f, e in zip(FA_DIGITS, EN_DIGITS): s = s.replace(f, e)
+    for a, e in zip(AR_DIGITS, EN_DIGITS): s = s.replace(a, e)
+    s = s.replace('٫', '.').replace('،', '.').replace(',', '.').replace(' ', '')
     return s
-
 
 def to_num(series):
     s = series.map(clean_num_text)
     s = s.replace({'': None, 'nan': None, 'None': None, '---': None, 'NaN': None})
     return pd.to_numeric(s, errors='coerce')
-
 
 def get_image_base64(path):
     try:
@@ -107,270 +86,359 @@ def get_image_base64(path):
     except Exception:
         return ''
 
-
 def smart_find_column(columns, keywords):
-    """یافتن ستون بر اساس تطبیق دقیق، سپس کلمه کلیدی"""
-    if columns is None:
-        return None
+    if columns is None: return None
     cols = list(columns)
     normed = {c: norm(c) for c in cols}
-    # 1) تطبیق کامل
     for k in keywords:
         nk = norm(k)
         for c in cols:
-            if normed[c] == nk:
-                return c
-    # 2) تطبیق کلمه کلیدی
+            if normed[c] == nk: return c
     for k in keywords:
         nk = norm(k)
         for c in cols:
-            if nk and nk in normed[c]:
-                return c
+            if nk and nk in normed[c]: return c
     return None
 
-
-def date_sort_key(val):
+def date_key_from_text(val):
     s = norm(val)
     m = re.search(r'(\d{2,4})\s*/\s*(\d{1,2})\s*/\s*(\d{1,2})', s)
     if m:
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        if y < 100:
-            y += 1400
+        if y < 100: y += 1400
         return y * 10000 + mo * 100 + d
-    m = re.search(r'(\d{6,8})', s)
+    m = re.search(r'(\d{4})(\d{2})(\d{2})', s)
     if m:
-        return int(m.group(1))
+        return int(m.group(1)) * 10000 + int(m.group(2)) * 100 + int(m.group(3))
     return 0
 
+# --- تبدیل تاریخ میلادی به شمسی (برای فیلتر خودکار اعلانیه‌ها) ---
+def g2j(gy, gm, gd):
+    g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
+    gy2, gm2, gd2 = gy - 1600, gm - 1, gd - 1
+    g_day_no = 365 * gy2 + (gy2 + 3) // 4 - (gy2 + 99) // 100 + (gy2 + 399) // 400
+    g_day_no += g_d_m[gm2]
+    if gm2 > 1 and ((gy % 4 == 0 and gy % 100 != 0) or gy % 400 == 0):
+        g_day_no += 1
+    g_day_no += gd2
+    j_day_no = g_day_no - 79
+    j_np = j_day_no // 12053
+    j_day_no %= 12053
+    jy = 979 + 33 * j_np + 4 * (j_day_no // 1461)
+    j_day_no %= 1461
+    if j_day_no >= 366:
+        jy += (j_day_no - 1) // 365
+        j_day_no = (j_day_no - 1) % 365
+    if j_day_no < 186:
+        jm, jd = 1 + j_day_no // 31, 1 + j_day_no % 31
+    else:
+        j_day_no -= 186
+        jm, jd = 7 + j_day_no // 30, 1 + j_day_no % 30
+    return jy, jm, jd
 
-def get_point_guide(eq_name, eq_type=''):
+def today_jkey():
+    now = datetime.now()
+    y, m, d = g2j(now.year, now.month, now.day)
+    return y * 10000 + m * 100 + d
+
+def jalali_today_str():
+    now = datetime.now()
+    y, m, d = g2j(now.year, now.month, now.day)
+    return f'{y:04d}/{m:02d}/{d:02d}'
+
+def is_true_flag(v):
+    s = norm(v)
+    if not s: return False
+    return s in ('بله', 'فعال', 'yes', 'true', '1', 'y', 'on', 'دارد')
+
+# --- راهنمای نقاط ---
+def get_point_items(eq_name, eq_type=''):
     name = norm(eq_name) + ' ' + norm(eq_type)
     if 'گیربکس' in name:
-        return ('P1: انتهای موتور | P2: جلوی موتور | P3: محور ورودی گیربکس | '
-                'P4: سمت آزاد محور ورودی | P5: سمت فیکس محور دوم | P6: سمت آزاد محور دوم | '
-                'P7: سمت فیکس محور سوم | P8: سمت آزاد محور سوم | P9: بابیت اول سمت گیربکس | '
-                'P10: بابیت دوم | P11: بابیت نزدیک پینیون آسیاب')
+        return ['P1: انتهای موتور', 'P2: جلوی موتور', 'P3: محور ورودی گیربکس',
+                'P4: سمت آزاد محور ورودی', 'P5: سمت فیکس محور دوم', 'P6: سمت آزاد محور دوم',
+                'P7: سمت فیکس محور سوم', 'P8: سمت آزاد محور سوم', 'P9: بابیت اول سمت گیربکس',
+                'P10: بابیت دوم', 'P11: بابیت نزدیک پینیون آسیاب']
     if 'کراشر' in name or 'سنگ شکن' in name:
-        return ('P1: انتهای موتور | P2: سر موتور | P3: یاتاقان سمت فیکس (پولی کوچک) | '
-                'P4: یاتاقان سمت آزاد (پولی کوچک) | P5: یاتاقان فیکس (روتور) | '
-                'P6: یاتاقان سمت آزاد (روتور)')
+        return ['P1: انتهای موتور', 'P2: سر موتور', 'P3: یاتاقان سمت فیکس (پولی کوچک)',
+                'P4: یاتاقان سمت آزاد (پولی کوچک)', 'P5: یاتاقان فیکس (روتور)',
+                'P6: یاتاقان سمت آزاد (روتور)']
     if 'فن' in name:
-        return 'P1: انتهای موتور | P2: سر موتور | P3: یاتاقان فیکس | P4: یاتاقان آزاد'
-    return 'راهنمای نقاط برای این نوع تجهیز تعریف نشده است.'
+        return ['P1: انتهای موتور', 'P2: سر موتور', 'P3: یاتاقان فیکس', 'P4: یاتاقان آزاد']
+    return []
 
+# --- سازنده‌های HTML با ایزوله‌سازی جهت متن (حل به‌هم‌ریختگی) ---
+def spec_box(label, value):
+    return (
+        "<div style='background:#ffffff; border:1px solid #d7e3f7; border-radius:10px; "
+        "padding:9px 14px; direction:rtl; unicode-bidi:isolate; text-align:right; min-width:150px;'>"
+        f"<div style='font-size:12px; color:#7d8ea8; font-family:Tahoma;'>{label}</div>"
+        f"<div style='font-size:15px; color:#1E3A8D; font-weight:bold; margin-top:3px; "
+        f"font-family:Tahoma; unicode-bidi:isolate;'>{value}</div>"
+        "</div>"
+    )
+
+def point_chip(text):
+    return (
+        "<div style='background:#ffffff; border:1px solid #cfdcf5; border-radius:20px; "
+        "padding:5px 14px; font-size:14px; color:#1E3A8D; font-family:Tahoma; "
+        "direction:rtl; unicode-bidi:isolate; white-space:nowrap;'>"
+        f"{text}"
+        "</div>"
+    )
+
+def render_points(items):
+    if not items:
+        return ("<div style='font-size:14px; color:#8a97ad; font-family:Tahoma; direction:rtl;'>"
+                "راهنمای نقاط برای این نوع تجهیز تعریف نشده است.</div>")
+    chips = ''.join(point_chip(i) for i in items)
+    return ("<div style='display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; "
+            "justify-content:flex-start;'>" + chips + "</div>")
+
+ANN_STYLES = {
+    'danger': ('#fdecec', '#e53935', '#b71c1c', '🚨'),
+    'warning': ('#fff8e1', '#f9a825', '#8d6e00', '⚠️'),
+    'success': ('#eaf7ec', '#2e7d32', '#1b5e20', '✅'),
+    'info': ('#eaf1fb', '#1E3A8D', '#14295f', 'ℹ️'),
+}
+
+def ann_kind(t):
+    s = norm(t)
+    if any(k in s for k in ['خطر', 'بحرانی', 'اضطراری', 'critical', 'danger']): return 'danger'
+    if any(k in s for k in ['هشدار', 'اخطار', 'warning', 'alert']): return 'warning'
+    if any(k in s for k in ['اطلاعیه', 'موفق', 'گزارش', 'success', 'info']): return 'success'
+    return 'info'
+
+def render_announcement(title, text, kind, label, start_txt, end_txt):
+    bg, border, dark, icon = ANN_STYLES.get(kind, ANN_STYLES['info'])
+    date_line = ''
+    if start_txt or end_txt:
+        s = f'از {start_txt}' if start_txt else ''
+        e = f' تا {end_txt}' if end_txt else ''
+        date_line = (f"<div style='font-size:12px; color:{dark}; opacity:.75; margin-top:8px; "
+                     f"font-family:Tahoma; direction:rtl; unicode-bidi:isolate;'>🗓{s}{e}</div>")
+    badge = ''
+    if label:
+        badge = (f"<span style='background:{border}; color:#fff; padding:3px 12px; border-radius:12px; "
+                 f"font-size:12px; font-family:Tahoma; white-space:nowrap; "
+                 f"unicode-bidi:isolate;'>{label}</span>")
+    return (
+        f"<div style='background:{bg}; border-right:8px solid {border}; border-radius:12px; "
+        f"padding:14px 18px; margin-bottom:12px; direction:rtl; text-align:right; "
+        f"box-shadow:0 2px 6px rgba(0,0,0,.05);'>"
+        f"<div style='display:flex; justify-content:space-between; align-items:center; gap:12px; "
+        f"flex-wrap:wrap;'>"
+        f"<div style='font-size:17px; font-weight:bold; color:{dark}; font-family:Tahoma; "
+        f"unicode-bidi:isolate;'>{icon} {title}</div>"
+        f"{badge}</div>"
+        f"<div style='margin-top:8px; font-size:14.5px; color:#333; line-height:1.9; "
+        f"font-family:Tahoma; unicode-bidi:plaintext;'>{text}</div>"
+        f"{date_line}"
+        "</div>"
+    )
 
 # ==============================================================================
-# 3. هدر
+# 3. بارگذاری داده‌ها
+# ==============================================================================
+BASE = 'https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid='
+VIB_URL = BASE + '0'
+ASSETS_URL = BASE + '1276803564'
+ANN_URL = BASE + '2057447521'
+
+@st.cache_data(ttl=600)
+def load_all_data():
+    df_vib, df_assets, df_ann = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    try:
+        df_vib = pd.read_csv(VIB_URL, dtype=str, keep_default_na=False, encoding='utf-8-sig')
+    except Exception:
+        pass
+    try:
+        df_assets = pd.read_csv(ASSETS_URL, dtype=str, keep_default_na=False, encoding='utf-8-sig')
+    except Exception:
+        pass
+    try:
+        df_ann = pd.read_csv(ANN_URL, dtype=str, keep_default_na=False, encoding='utf-8-sig')
+    except Exception:
+        pass
+    return df_vib, df_assets, df_ann
+
+df, df_assets, df_ann = load_all_data()
+
+# ==============================================================================
+# 4. هدر
 # ==============================================================================
 logo_siman = get_image_base64('client_logo.png')
 logo_faz = get_image_base64('my_logo.png')
 
 st.markdown(f'''
-<div style='display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;
-            background:white; padding:15px 30px; border-radius:15px;
-            box-shadow:0 4px 8px rgba(0,0,0,0.1);'>
-    <img src='data:image/png;base64,{logo_faz}' style='width:110px; height:auto;'>
-    <div style='text-align:center; color:#1E3A8D; font-size:26px; font-weight:bold; font-family:Tahoma;'>
-        🛠️ سامانه پایش وضعیت تجهیزات سیمان تهران
-    </div>
-    <img src='data:image/png;base64,{logo_siman}' style='width:110px; height:auto;'>
+<div style='display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;
+            background:white; padding:14px 28px; border-radius:15px;
+            box-shadow:0 4px 8px rgba(0,0,0,0.08);'>
+    <img src='data:image/png;base64,{logo_faz}' style='width:105px; height:auto;'>
+    <div style='text-align:center; color:#1E3A8D; font-size:25px; font-weight:bold;
+                font-family:Tahoma;'>🛠️ سامانه پایش وضعیت تجهیزات سیمان تهران</div>
+    <img src='data:image/png;base64,{logo_siman}' style='width:105px; height:auto;'>
 </div>
 ''', unsafe_allow_html=True)
 
 # ==============================================================================
-# 3-1. اعلان‌ها و هشدارها (قابل ویرایش)
+# 5. اعلانیه‌ها و هشدارها (از شیت جداگانه + فیلتر تاریخ خودکار)
 # ==============================================================================
-# type می‌تواند باشد: success (سبز) | warning (زرد) | error (قرمز) | info (آبی)
-ANNOUNCEMENTS = [
-    {'type': 'info',    'msg': 'ℹ️ به سامانه پایش وضعیت تجهیزات سیمان تهران خوش آمدید.'},
-    {'type': 'warning', 'msg': '⚠️ اعلامیه: بازرسی دوره‌ای خطوط تولید طبق برنامه انجام می‌شود.'},
-    {'type': 'error',   'msg': '🚨 هشدار: تجهیزاتی با ارتعاش بالاتر از حد بحرانی (۷.۱ mm/s) شناسایی شد.'},
-    {'type': 'success', 'msg': '✅ وضعیت عمومی تجهیزات در محدوده سالم گزارش شده است.'},
-]
+if not df_ann.empty:
+    c_title = smart_find_column(df_ann.columns, ['عنوان'])
+    c_text = smart_find_column(df_ann.columns, ['متن', 'محتوا', 'توضیحات'])
+    c_type = smart_find_column(df_ann.columns, ['نوع'])
+    c_active = smart_find_column(df_ann.columns, ['فعال'])
+    c_start = smart_find_column(df_ann.columns, ['تاریخ شروع', 'شروع'])
+    c_end = smart_find_column(df_ann.columns, ['تاریخ انقضا', 'انقضا', 'پایان'])
+    c_label = smart_find_column(df_ann.columns, ['برچسب', 'تگ'])
 
-_SHOW_ANNOUNCEMENTS = True  # برای غیرفعال کردن کل بخش، این را False کنید
+    if c_title and c_text:
+        tkey = today_jkey()
+        shown = 0
+        cards = []
 
-if _SHOW_ANNOUNCEMENTS:
-    for ann in ANNOUNCEMENTS:
-        t = str(ann.get('type', 'info')).lower()
-        m = ann.get('msg', '')
-        if not m:
-            continue
-        if t == 'success':
-            st.success(m)
-        elif t == 'warning':
-            st.warning(m)
-        elif t == 'error':
-            st.error(m)
+        for _, row in df_ann.iterrows():
+            if c_active and not is_true_flag(row[c_active]):
+                continue
+            if c_start:
+                sk = date_key_from_text(row[c_start])
+                if sk and tkey < sk:
+                    continue
+            if c_end:
+                ek = date_key_from_text(row[c_end])
+                if ek and tkey > ek:
+                    continue
+
+            title = str(row[c_title]).strip()
+            if not title:
+                continue
+
+            cards.append(render_announcement(
+                title=title,
+                text=str(row[c_text]).strip(),
+                kind=ann_kind(row[c_type] if c_type else ''),
+                label=str(row[c_label]).strip() if c_label else '',
+                start_txt=str(row[c_start]).strip() if c_start else '',
+                end_txt=str(row[c_end]).strip() if c_end else '',
+            ))
+            shown += 1
+
+        if shown:
+            st.markdown(
+                f"<div style='font-size:13px; color:#7d8ea8; font-family:Tahoma; direction:rtl; "
+                f"margin-bottom:8px;'>📌 اعلانیه‌های فعال — امروز {jalali_today_str()} "
+                f"({shown} مورد)</div>",
+                unsafe_allow_html=True
+            )
+            st.markdown(''.join(cards), unsafe_allow_html=True)
         else:
-            st.info(m)
+            st.markdown(
+                "<div style='background:#eaf7ec; border-right:8px solid #2e7d32; border-radius:12px; "
+                "padding:12px 18px; font-family:Tahoma; color:#1b5e20; direction:rtl;'>"
+                "✅ در حال حاضر اعلانیه فعالی وجود ندارد.</div>",
+                unsafe_allow_html=True
+            )
+    else:
+        st.info('ℹ️ ستون‌های «عنوان» و «متن» در شیت اعلانیه پیدا نشد.')
+else:
+    st.warning('⚠️ شیت اعلانیه خوانده نشد. دسترسی را روی Anyone with the link بگذارید.')
 
 # ==============================================================================
-# 4. بارگذاری داده‌ها
-# ==============================================================================
-VIB_URL = ('https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/'
-           'export?format=csv&gid=0')
-ASSETS_URL = ('https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/'
-              'export?format=csv&gid=1276803564')
-
-
-@st.cache_data(ttl=600)
-def load_all_data():
-    df_vib = pd.DataFrame()
-    df_assets = pd.DataFrame()
-    try:
-        df_vib = pd.read_csv(VIB_URL, dtype=str, keep_default_na=False, encoding='utf-8-sig')
-    except Exception as e:
-        st.error(f'❌ خطا در خواندن شیت ارتعاشات: {e}')
-    try:
-        df_assets = pd.read_csv(ASSETS_URL, dtype=str, keep_default_na=False, encoding='utf-8-sig')
-    except Exception as e:
-        st.warning(f'⚠️ شیت مشخصات فنی (Assets) بارگذاری نشد. ({e})')
-    return df_vib, df_assets
-
-
-df, df_assets = load_all_data()
-
-# ==============================================================================
-# 5. فیلترهای سایدبار
+# 6. فیلترهای سایدبار
 # ==============================================================================
 st.sidebar.header('🔍 فیلترهای پیشرفته')
 
 if not df.empty:
     col_line = smart_find_column(df.columns, ['خط تولید', 'خط'])
     col_unit = smart_find_column(df.columns, ['واحد'])
-    equip_col = smart_find_column(df.columns, ['نام تجهیز', 'عنوان تجهیز', 'تجهیز', 'Equipment', 'Asset'])
+    equip_col = smart_find_column(df.columns, ['نام تجهیز', 'عنوان تجهیز', 'تجهیز', 'Asset', 'Equipment'])
     date_col = smart_find_column(df.columns, ['تاریخ', 'Date'])
 
     df['_k_line'] = df[col_line].map(norm) if col_line else ''
     df['_k_unit'] = df[col_unit].map(norm) if col_unit else ''
     df['_k_eq'] = df[equip_col].map(norm) if equip_col else ''
     df['_k_date'] = df[date_col].map(norm) if date_col else ''
-    df['_dkey'] = df[date_col].map(date_sort_key) if date_col else 0
+    df['_dkey'] = df[date_col].map(date_key_from_text) if date_col else 0
 
     def _mode(series):
         v = series.astype(str).str.strip()
         v = v[v != '']
-        if v.empty:
-            return ''
-        return v.value_counts().idxmax()
+        return v.value_counts().idxmax() if not v.empty else ''
 
     def display_map(key_col, original_col):
-        if original_col is None:
-            return {}
+        if original_col is None: return {}
         tmp = df[df[key_col] != '']
-        if tmp.empty:
-            return {}
+        if tmp.empty: return {}
         return tmp.groupby(key_col)[original_col].agg(_mode).to_dict()
 
     line_map = display_map('_k_line', col_line)
     unit_map = display_map('_k_unit', col_unit)
     eq_map = display_map('_k_eq', equip_col)
 
-    # ---------- خط تولید ----------
-    lines = sorted(line_map.keys())
     sel_line_k = st.sidebar.selectbox(
-        '📍 خط تولید:', ['همه'] + lines,
-        format_func=lambda k: 'همه' if k == 'همه' else line_map.get(k, k)
-    )
+        '📍 خط تولید:', ['همه'] + sorted(line_map.keys()),
+        format_func=lambda k: 'همه' if k == 'همه' else line_map.get(k, k))
 
-    # ---------- واحد ----------
-    tmp = df.copy()
+    tmp_u = df.copy()
     if sel_line_k != 'همه':
-        tmp = tmp[tmp['_k_line'] == sel_line_k]
-    unit_keys = sorted([u for u in tmp['_k_unit'].unique() if u != ''])
+        tmp_u = tmp_u[tmp_u['_k_line'] == sel_line_k]
+    unit_keys = sorted([u for u in tmp_u['_k_unit'].unique() if u != ''])
     sel_unit_k = st.sidebar.selectbox(
         '🏢 واحد:', ['همه'] + unit_keys,
-        format_func=lambda k: 'همه' if k == 'همه' else unit_map.get(k, k)
-    )
+        format_func=lambda k: 'همه' if k == 'همه' else unit_map.get(k, k))
 
-    # ---------- تجهیز ----------
     if sel_unit_k != 'همه':
-        tmp = tmp[tmp['_k_unit'] == sel_unit_k]
-    eq_keys = sorted([e for e in tmp['_k_eq'].unique() if e != ''])
+        tmp_u = tmp_u[tmp_u['_k_unit'] == sel_unit_k]
+    eq_keys = sorted([e for e in tmp_u['_k_eq'].unique() if e != ''])
     sel_eq_k = st.sidebar.selectbox(
         '⚙️ انتخاب تجهیز:', ['همه تجهیزات'] + eq_keys,
-        format_func=lambda k: 'همه تجهیزات' if k == 'همه تجهیزات' else eq_map.get(k, k)
-    )
+        format_func=lambda k: 'همه تجهیزات' if k == 'همه تجهیزات' else eq_map.get(k, k))
 
     search_eq = st.sidebar.text_input('🔎 جستجوی سریع تجهیز:', placeholder='مثلاً: میل فن')
 
-    # ---------- تاریخ ----------
     st.sidebar.markdown('**📅 فیلتر تاریخ**')
-    date_search = st.sidebar.text_input('جستجوی تاریخ (مثلاً 1405/08):')
-
     date_map = {}
     if date_col:
         tmp_d = df[df['_k_date'] != '']
-        date_map = tmp_d.groupby('_k_date')[date_col].agg(_mode).to_dict()
+        if not tmp_d.empty:
+            date_map = tmp_d.groupby('_k_date')[date_col].agg(_mode).to_dict()
     date_keys = sorted(list(date_map.keys()), reverse=True)
     sel_date_k = st.sidebar.selectbox(
         '🌙 انتخاب تاریخ:', ['همه تاریخ‌ها'] + date_keys,
-        format_func=lambda k: 'همه تاریخ‌ها' if k == 'همه تاریخ‌ها' else date_map.get(k, k)
-    )
+        format_func=lambda k: 'همه تاریخ‌ها' if k == 'همه تاریخ‌ها' else date_map.get(k, k))
 
-    # ==========================================================================
-    # 6. اعمال فیلترها
-    # ==========================================================================
     fdf = df.copy()
-    if sel_line_k != 'همه':
-        fdf = fdf[fdf['_k_line'] == sel_line_k]
-    if sel_unit_k != 'همه':
-        fdf = fdf[fdf['_k_unit'] == sel_unit_k]
-    if sel_eq_k != 'همه تجهیزات':
-        fdf = fdf[fdf['_k_eq'] == sel_eq_k]
-
+    if sel_line_k != 'همه': fdf = fdf[fdf['_k_line'] == sel_line_k]
+    if sel_unit_k != 'همه': fdf = fdf[fdf['_k_unit'] == sel_unit_k]
+    if sel_eq_k != 'همه تجهیزات': fdf = fdf[fdf['_k_eq'] == sel_eq_k]
     if search_eq.strip():
-        q = norm(search_eq)
-        tokens = [t for t in q.split() if t]
+        tokens = [t for t in norm(search_eq).split() if t]
         if tokens:
-            mask = fdf['_k_eq'].map(lambda v: all(t in v for t in tokens))
-            if mask.any():
-                fdf = fdf[mask]
-
-    if date_search.strip():
-        fdf = fdf[fdf['_k_date'].str.contains(norm(date_search), na=False, regex=False)]
-    if sel_date_k != 'همه تاریخ‌ها':
-        fdf = fdf[fdf['_k_date'] == sel_date_k]
-
-    if date_col:
-        fdf = fdf.sort_values(by='_dkey', ascending=False)
+            fdf = fdf[fdf['_k_eq'].map(lambda v: all(t in v for t in tokens))]
+    if sel_date_k != 'همه تاریخ‌ها': fdf = fdf[fdf['_k_date'] == sel_date_k]
+    if date_col: fdf = fdf.sort_values(by='_dkey', ascending=False)
 
     # ==========================================================================
-    # 7. نمایش
+    # 7. نمایش اصلی
     # ==========================================================================
-    st.markdown('<style>.main .block-container { padding-right:1rem; padding-left:1rem; }</style>',
-                unsafe_allow_html=True)
     st.title('📊 تحلیل روند ارتعاشات تجهیزات')
 
     visible_cols = [c for c in df.columns if not str(c).startswith('_')]
+    vib_cols = [
+        c for c in visible_cols
+        if any(k in norm(c) for k in ['عمودی', 'افقی', 'محوری'])
+        or re.match(r'^p\s*\d+', norm(c))
+    ]
 
-    # --------------------------------------------------------------------------
-    # شناسایی ستون‌های ارتعاشات: کلمات کلیدی + نقاط P1, P2, ...
-    # --------------------------------------------------------------------------
-    def is_vib_col(c):
-        name = str(c).strip()
-        low = name.lower()
-        if any(k in name for k in ['عمودی', 'افقی', 'محوری']):
-            return True
-        if any(k in low for k in ['vertical', 'horizontal', 'axial', 'mm/s', 'mm/s']):
-            return True
-        # نقاط اندازه‌گیری مثل P1, P2, ... , P11
-        if re.match(r'^p\s*\d+', low):
-            return True
-        return False
-
-    vib_cols = [c for c in visible_cols if is_vib_col(c)]
-
-    # --------------------------------------------------------------------------
-    # 7-1. کارت مشخصات فنی + قطعات (اول صفحه)
-    # --------------------------------------------------------------------------
-    matched = False
+    # --- کارت مشخصات فنی ---
     if sel_eq_k != 'همه تجهیزات':
         eq_display = eq_map.get(sel_eq_k, sel_eq_k)
+        matched = False
 
         if not df_assets.empty:
-            a_name = smart_find_column(df_assets.columns, ['نام تجهیز', 'عنوان تجهیز', 'نام', 'تجهیز', 'Asset'])
+            a_name = smart_find_column(df_assets.columns,
+                                       ['نام تجهیز', 'عنوان تجهیز', 'نام', 'تجهیز', 'Asset'])
             if a_name:
                 n_assets = df_assets[a_name].map(norm)
                 rows = df_assets[n_assets == sel_eq_k]
@@ -383,8 +451,7 @@ if not df.empty:
 
                     def gv(keys, default='---'):
                         c = smart_find_column(df_assets.columns, keys)
-                        if not c:
-                            return default
+                        if not c: return default
                         v = str(r0[c]).strip()
                         return v if v not in ('', 'nan', 'None', 'NaN') else default
 
@@ -397,33 +464,35 @@ if not df.empty:
                     e_brg = gv(['شماره بیرینگ', 'بیرینگ', 'برینگ', 'Bearing'])
                     e_bush = gv(['شماره بوش', 'بوش', 'Bush'])
 
-                    st.markdown(f'''
-                    <div style='background:#f0f7ff; padding:20px 24px; border-radius:15px;
-                                border-right:10px solid #1E3A8D; margin-bottom:18px; text-align:right;
-                                direction:rtl; box-shadow:2px 2px 8px rgba(0,0,0,0.06);'>
-                        <h3 style='color:#1E3A8D; margin:0 0 14px 0; font-family:Tahoma;'>
-                            🛠️ مشخصات فنی: {eq_display}
-                        </h3>
-                        <div style='display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
-                                    gap:10px 24px; font-size:16px; color:#333; font-family:Tahoma;
-                                    word-break:break-word;'>
-                            <div><b style='color:#1E3A8D;'>🔹 نوع تجهیز:</b> {e_type}</div>
-                            <div><b style='color:#1E3A8D;'>🔹 دور:</b> {e_rpm} RPM</div>
-                            <div><b style='color:#1E3A8D;'>🔹 خط تولید:</b> {e_line}</div>
-                            <div><b style='color:#1E3A8D;'>🔹 واحد:</b> {e_unit}</div>
-                            <div><b style='color:#1E3A8D;'>🔹 نوع انتقال قدرت:</b> {e_drive}</div>
-                            <div><b style='color:#1E3A8D;'>🧩 شماره بیرینگ:</b> {e_brg}</div>
-                            <div><b style='color:#1E3A8D;'>🧩 شماره بوش:</b> {e_bush}</div>
-                        </div>
-                        <div style='margin-top:14px; font-size:15px; color:#1E3A8D; background:#e6efff;
-                                    padding:8px 15px; border-radius:8px; display:block;
-                                    font-family:Tahoma; line-height:1.9; word-break:break-word;'>
-                            <b>📍 راهنمای نقاط (P-Map):</b> {get_point_guide(eq_display, e_type)}
-                        </div>
-                    </div>
-                    ''', unsafe_allow_html=True)
+                    boxes = ''.join([
+                        spec_box('نوع تجهیز', e_type),
+                        spec_box('دور گردش (RPM)', e_rpm),
+                        spec_box('خط تولید', e_line),
+                        spec_box('واحد', e_unit),
+                        spec_box('نوع انتقال قدرت', e_drive),
+                        spec_box('شماره بیرینگ', e_brg),
+                        spec_box('شماره بوش', e_bush),
+                    ])
 
-                    # جدول قطعات و لجستیک
+                    st.markdown(
+                        "<div style='background:#f0f7ff; padding:20px 24px; border-radius:15px; "
+                        "border-right:10px solid #1E3A8D; margin-bottom:18px; direction:rtl; "
+                        "text-align:right; box-shadow:0 2px 8px rgba(0,0,0,.06);'>"
+                        "<div style='color:#1E3A8D; font-size:19px; font-weight:bold; font-family:Tahoma; "
+                        "margin-bottom:14px; unicode-bidi:isolate;'>"
+                        f"🛠️ مشخصات فنی: {eq_display}</div>"
+                        "<div style='display:flex; flex-wrap:wrap; gap:10px;'>"
+                        f"{boxes}</div>"
+                        "<div style='margin-top:16px; background:#e6efff; border-radius:10px; "
+                        "padding:12px 16px; direction:rtl;'>"
+                        "<div style='font-size:14px; color:#1E3A8D; font-weight:bold; "
+                        "font-family:Tahoma;'>📍 راهنمای نقاط (P-Map)</div>"
+                        f"{render_points(get_point_items(eq_display, e_type))}"
+                        "</div>"
+                        "</div>",
+                        unsafe_allow_html=True
+                    )
+
                     pts = smart_find_column(df_assets.columns, ['نقطه', 'پوینت', 'Point'])
                     brg = smart_find_column(df_assets.columns, ['بیرینگ', 'برینگ', 'Bearing'])
                     bsh = smart_find_column(df_assets.columns, ['بوش', 'Bush'])
@@ -433,95 +502,85 @@ if not df.empty:
                         logistics = rows[log_cols].copy()
                         logistics = logistics.replace({'': '---', 'nan': '---', 'None': '---', 'NaN': '---'})
                         rename = {}
-                        if pts:
-                            rename[pts] = 'نقطه اندازه‌گیری'
-                        if brg:
-                            rename[brg] = 'شماره بیرینگ'
-                        if bsh:
-                            rename[bsh] = 'شماره بوش'
+                        if pts: rename[pts] = 'نقطه اندازه‌گیری'
+                        if brg: rename[brg] = 'شماره بیرینگ'
+                        if bsh: rename[bsh] = 'شماره بوش'
                         logistics = logistics.rename(columns=rename)
                         with st.expander('📦 اطلاعات قطعات و لجستیک (بیرینگ / بوش)', expanded=True):
-                            st.dataframe(logistics, hide_index=True, use_container_width=True)
+                            st.dataframe(
+                                logistics.style.set_properties(
+                                    **{'direction': 'rtl', 'text-align': 'right', 'font-family': 'Tahoma'}),
+                                hide_index=True, use_container_width=True)
 
-                    # تمام ستون‌های شیت Assets برای این تجهیز
                     with st.expander('📋 مشاهده تمام مشخصات ثبت‌شده این تجهیز', expanded=False):
                         full = pd.DataFrame({
                             'عنوان': list(df_assets.columns),
                             'مقدار': [str(x).strip() for x in r0.values]
                         })
                         full = full[~full['مقدار'].isin(['', 'nan', 'None', 'NaN'])]
-                        st.dataframe(full, hide_index=True, use_container_width=True)
+                        st.dataframe(
+                            full.style.set_properties(
+                                **{'direction': 'rtl', 'text-align': 'right', 'font-family': 'Tahoma'}),
+                            hide_index=True, use_container_width=True)
 
         if not matched:
-            st.info('ℹ️ برای این تجهیز، ردیف مشخصاتی در شیت Assets پیدا نشد. '
-                    '(نام تجهیز در دو شیت باید مشابه باشد.)')
+            st.info('ℹ️ برای این تجهیز، ردیفی در شیت مشخصات فنی (Assets) پیدا نشد.')
 
-    # --------------------------------------------------------------------------
-    # 7-2. جدول داده‌های ارتعاشات
-    # --------------------------------------------------------------------------
+    # --- جدول ارتعاشات ---
     if not fdf.empty:
         st.markdown(f'### 📋 داده‌های ارتعاشات ({len(fdf)} مورد)')
 
         def color_vib(val):
             try:
                 v = float(clean_num_text(val))
+                if v > 7.1: return 'background-color:#ff4b4b; color:white; font-weight:bold;'
+                if v > 4.5: return 'background-color:#ffa500; color:white; font-weight:bold;'
+                return 'background-color:#2e7d32; color:white;'
             except Exception:
                 return ''
-            if v > 7.1:
-                return 'background-color:#ff4b4b; color:white'
-            if v > 4.5:
-                return 'background-color:#ffa500; color:white'
-            return 'background-color:#2e7d32; color:white'
 
         table = fdf[visible_cols].copy()
+        styler = table.style
         if vib_cols:
-            try:
-                styled = table.style.map(color_vib, subset=vib_cols)
-            except AttributeError:
-                styled = table.style.applymap(color_vib, subset=vib_cols)
-            st.dataframe(styled, use_container_width=True, hide_index=True)
-        else:
-            st.dataframe(table, use_container_width=True, hide_index=True)
+            styler = styler.map(color_vib, subset=vib_cols)
+        styler = styler.set_properties(
+            **{'direction': 'rtl', 'text-align': 'right', 'font-family': 'Tahoma'})
+        st.dataframe(styler, use_container_width=True, hide_index=True)
 
-        # ----------------------------------------------------------------------
-        # 7-3. نمودار روند ارتعاشات (برای تجهیز انتخاب‌شده)
-        # ----------------------------------------------------------------------
+        if vib_cols and not fdf.empty:
+            legend = ("<div style='display:flex; gap:18px; flex-wrap:wrap; font-family:Tahoma; "
+                      "font-size:13px; direction:rtl; margin:6px 0 10px 0;'>"
+                      "<span>🟢 سالم (≤ 4.5)</span>"
+                      "<span>🟠 هشدار (4.5 – 7.1)</span>"
+                      "<span>🔴 بحرانی (&gt; 7.1)</span></div>")
+            st.markdown(legend, unsafe_allow_html=True)
+
+        # --- نمودار روند ---
         if vib_cols and sel_eq_k != 'همه تجهیزات' and date_col and len(fdf) > 1:
             with st.expander('📈 نمودار روند ارتعاشات این تجهیز در طول زمان', expanded=False):
                 trend = fdf[[date_col] + vib_cols].copy()
-                trend['_dkey'] = trend[date_col].map(date_sort_key)
+                trend['_dkey'] = trend[date_col].map(date_key_from_text)
                 trend = trend.sort_values('_dkey')
                 trend['تاریخ'] = trend[date_col].astype(str)
 
-                long_df = trend.melt(
-                    id_vars=['تاریخ', '_dkey'],
-                    value_vars=vib_cols,
-                    var_name='نقطه/جهت',
-                    value_name='ارتعاش'
-                )
+                long_df = trend.melt(id_vars=['تاریخ', '_dkey'], value_vars=vib_cols,
+                                     var_name='نقطه/جهت', value_name='ارتعاش')
                 long_df['ارتعاش'] = to_num(long_df['ارتعاش'])
                 long_df = long_df.dropna(subset=['ارتعاش'])
 
                 if not long_df.empty:
-                    fig_line = px.line(
-                        long_df,
-                        x='تاریخ',
-                        y='ارتعاش',
-                        color='نقطه/جهت',
-                        markers=True,
-                        title='روند ارتعاش بر حسب تاریخ اندازه‌گیری (mm/s)'
-                    )
-                    fig_line.add_hline(y=4.5, line_dash='dash', line_color='orange',
-                                       annotation_text='حد هشدار 4.5')
-                    fig_line.add_hline(y=7.1, line_dash='dash', line_color='red',
-                                       annotation_text='حد بحرانی 7.1')
-                    st.plotly_chart(fig_line, use_container_width=True)
+                    fig = px.line(long_df, x='تاریخ', y='ارتعاش', color='نقطه/جهت',
+                                  markers=True, title='روند ارتعاش (mm/s)')
+                    fig.add_hline(y=4.5, line_dash='dash', line_color='orange',
+                                  annotation_text='حد هشدار')
+                    fig.add_hline(y=7.1, line_dash='dash', line_color='red',
+                                  annotation_text='حد بحرانی')
+                    fig.update_layout(font=dict(family='Tahoma', size=13))
+                    st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.info('داده عددی معتبری برای رسم روند وجود ندارد.')
+                    st.info('داده عددی برای رسم نمودار وجود ندارد.')
 
-        # ----------------------------------------------------------------------
-        # 7-4. نمودار دایره‌ای وضعیت سلامت (انتهای صفحه)
-        # ----------------------------------------------------------------------
+        # --- نمودار دایره‌ای سلامت ---
         st.markdown('---')
         st.markdown('### 📈 تحلیل وضعیت سلامت تجهیزات')
         with st.expander('نمایش نمودار دایره‌ای وضعیت سلامت', expanded=False):
@@ -529,44 +588,32 @@ if not df.empty:
                 v_max = fdf[vib_cols].apply(to_num, axis=0).max(axis=1)
 
                 def cat(v):
-                    if pd.isna(v):
-                        return 'نامشخص'
-                    if v > 7.1:
-                        return 'بحرانی'
-                    if v > 4.5:
-                        return 'هشدار'
+                    if pd.isna(v): return 'نامشخص'
+                    if v > 7.1: return 'بحرانی'
+                    if v > 4.5: return 'هشدار'
                     return 'سالم'
 
                 status = v_max.map(cat).value_counts()
                 if not status.empty:
                     fig_pie = px.pie(
-                        values=status.values,
-                        names=status.index,
-                        color=status.index,
-                        color_discrete_map={
-                            'سالم': '#2e7d32',
-                            'هشدار': '#ffa500',
-                            'بحرانی': '#ff4b4b',
-                            'نامشخص': '#9e9e9e'
-                        },
-                        hole=0.35
-                    )
+                        values=status.values, names=status.index, color=status.index,
+                        color_discrete_map={'سالم': '#2e7d32', 'هشدار': '#ffa500',
+                                            'بحرانی': '#ff4b4b', 'نامشخص': '#9e9e9e'},
+                        hole=0.35)
                     fig_pie.update_traces(textinfo='percent+label')
+                    fig_pie.update_layout(font=dict(family='Tahoma', size=13))
                     st.plotly_chart(fig_pie, use_container_width=True)
-                    st.caption('معیار: بیشینه ارتعاش هر ردیف — سالم ≤ 4.5 | هشدار 4.5 تا 7.1 | بحرانی > 7.1 (mm/s)')
                 else:
-                    st.info('داده عددی معتبری برای تحلیل سلامت وجود ندارد.')
+                    st.info('داده‌ای برای تحلیل سلامت یافت نشد.')
             else:
-                st.info('ستون‌های ارتعاشات (عمودی/افقی/محوری) پیدا نشد.')
-
+                st.info('ستون‌های ارتعاشات یافت نشد.')
     else:
-        st.warning('⚠️ هیچ داده‌ای با این فیلترها پیدا نشد. فیلترها را بازتر کنید.')
+        st.warning('⚠️ هیچ داده‌ای با این فیلترها پیدا نشد.')
 
     st.markdown(
         '<div style="text-align:center; margin-top:50px; color:#555; font-family:Tahoma;">'
         'طراحی و توسعه: مهندس هادی زندیه | شرکت فاز فیدار پارسیان</div>',
         unsafe_allow_html=True
     )
-
 else:
-    st.error('❌ خطا در دریافت داده‌ها. لطفاً لینک گوگل‌شیت و دسترسی آن را بررسی کنید.')
+    st.error('❌ خطا در دریافت داده‌ها از گوگل‌شیت.')
