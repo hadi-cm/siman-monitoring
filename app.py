@@ -78,7 +78,8 @@ def norm(x):
           .replace('ك', 'ک').replace('ۀ', 'ه').replace('ة', 'ه'))
     s = s.replace('\u200c', ' ').replace('\xa0', ' ')
     s = s.replace('-', ' ').replace('_', ' ').replace('.', ' ')
-    return ' '.join(s.split()).lower()
+    s = ' '.join(s.split()).lower()
+    return s
 
 
 def clean_num_text(x):
@@ -129,7 +130,6 @@ def smart_find_column(columns, keywords):
 
 
 def date_sort_key(val):
-    """تبدیل تاریخ متنی (شمسی یا میلادی) به عدد قابل مرتب‌سازی: YYYYMMDD"""
     s = norm(val)
     m = re.search(r'(\d{2,4})\s*/\s*(\d{1,2})\s*/\s*(\d{1,2})', s)
     if m:
@@ -158,8 +158,9 @@ def get_point_guide(eq_name, eq_type=''):
         return 'P1: انتهای موتور | P2: سر موتور | P3: یاتاقان فیکس | P4: یاتاقان آزاد'
     return 'راهنمای نقاط برای این نوع تجهیز تعریف نشده است.'
 
+
 # ==============================================================================
-# 3. هدر و لوگوها
+# 3. هدر
 # ==============================================================================
 logo_siman = get_image_base64('client_logo.png')
 logo_faz = get_image_base64('my_logo.png')
@@ -177,7 +178,35 @@ st.markdown(f'''
 ''', unsafe_allow_html=True)
 
 # ==============================================================================
-# 4. بارگذاری داده‌ها (متن خام => بدون صفر اضافه)
+# 3-1. اعلان‌ها و هشدارها (قابل ویرایش)
+# ==============================================================================
+# type می‌تواند باشد: success (سبز) | warning (زرد) | error (قرمز) | info (آبی)
+ANNOUNCEMENTS = [
+    {'type': 'info',    'msg': 'ℹ️ به سامانه پایش وضعیت تجهیزات سیمان تهران خوش آمدید.'},
+    {'type': 'warning', 'msg': '⚠️ اعلامیه: بازرسی دوره‌ای خطوط تولید طبق برنامه انجام می‌شود.'},
+    {'type': 'error',   'msg': '🚨 هشدار: تجهیزاتی با ارتعاش بالاتر از حد بحرانی (۷.۱ mm/s) شناسایی شد.'},
+    {'type': 'success', 'msg': '✅ وضعیت عمومی تجهیزات در محدوده سالم گزارش شده است.'},
+]
+
+_SHOW_ANNOUNCEMENTS = True  # برای غیرفعال کردن کل بخش، این را False کنید
+
+if _SHOW_ANNOUNCEMENTS:
+    for ann in ANNOUNCEMENTS:
+        t = str(ann.get('type', 'info')).lower()
+        m = ann.get('msg', '')
+        if not m:
+            continue
+        if t == 'success':
+            st.success(m)
+        elif t == 'warning':
+            st.warning(m)
+        elif t == 'error':
+            st.error(m)
+        else:
+            st.info(m)
+
+# ==============================================================================
+# 4. بارگذاری داده‌ها
 # ==============================================================================
 VIB_URL = ('https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/'
            'export?format=csv&gid=0')
@@ -315,14 +344,30 @@ if not df.empty:
     st.title('📊 تحلیل روند ارتعاشات تجهیزات')
 
     visible_cols = [c for c in df.columns if not str(c).startswith('_')]
-    vib_cols = [c for c in visible_cols if any(k in str(c) for k in ['عمودی', 'افقی', 'محوری'])]
+
+    # --------------------------------------------------------------------------
+    # شناسایی ستون‌های ارتعاشات: کلمات کلیدی + نقاط P1, P2, ...
+    # --------------------------------------------------------------------------
+    def is_vib_col(c):
+        name = str(c).strip()
+        low = name.lower()
+        if any(k in name for k in ['عمودی', 'افقی', 'محوری']):
+            return True
+        if any(k in low for k in ['vertical', 'horizontal', 'axial', 'mm/s', 'mm/s']):
+            return True
+        # نقاط اندازه‌گیری مثل P1, P2, ... , P11
+        if re.match(r'^p\s*\d+', low):
+            return True
+        return False
+
+    vib_cols = [c for c in visible_cols if is_vib_col(c)]
 
     # --------------------------------------------------------------------------
     # 7-1. کارت مشخصات فنی + قطعات (اول صفحه)
     # --------------------------------------------------------------------------
+    matched = False
     if sel_eq_k != 'همه تجهیزات':
         eq_display = eq_map.get(sel_eq_k, sel_eq_k)
-        matched = False
 
         if not df_assets.empty:
             a_name = smart_find_column(df_assets.columns, ['نام تجهیز', 'عنوان تجهیز', 'نام', 'تجهیز', 'Asset'])
@@ -359,22 +404,20 @@ if not df.empty:
                         <h3 style='color:#1E3A8D; margin:0 0 14px 0; font-family:Tahoma;'>
                             🛠️ مشخصات فنی: {eq_display}
                         </h3>
-                        <div style='display:flex; flex-wrap:wrap; gap:10px 28px; font-size:16px;
-                                    color:#333; font-family:Tahoma;'>
-                            <span><b style='color:#1E3A8D;'>🔹 نوع تجهیز:</b> {e_type}</span>
-                            <span><b style='color:#1E3A8D;'>🔹 دور:</b> {e_rpm} RPM</span>
-                            <span><b style='color:#1E3A8D;'>🔹 خط تولید:</b> {e_line}</span>
-                            <span><b style='color:#1E3A8D;'>🔹 واحد:</b> {e_unit}</span>
-                            <span><b style='color:#1E3A8D;'>🔹 نوع انتقال قدرت:</b> {e_drive}</span>
-                        </div>
-                        <div style='display:flex; flex-wrap:wrap; gap:10px 28px; font-size:16px;
-                                    color:#333; margin-top:10px; font-family:Tahoma;'>
-                            <span><b style='color:#1E3A8D;'>🧩 شماره بیرینگ:</b> {e_brg}</span>
-                            <span><b style='color:#1E3A8D;'>🧩 شماره بوش:</b> {e_bush}</span>
+                        <div style='display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+                                    gap:10px 24px; font-size:16px; color:#333; font-family:Tahoma;
+                                    word-break:break-word;'>
+                            <div><b style='color:#1E3A8D;'>🔹 نوع تجهیز:</b> {e_type}</div>
+                            <div><b style='color:#1E3A8D;'>🔹 دور:</b> {e_rpm} RPM</div>
+                            <div><b style='color:#1E3A8D;'>🔹 خط تولید:</b> {e_line}</div>
+                            <div><b style='color:#1E3A8D;'>🔹 واحد:</b> {e_unit}</div>
+                            <div><b style='color:#1E3A8D;'>🔹 نوع انتقال قدرت:</b> {e_drive}</div>
+                            <div><b style='color:#1E3A8D;'>🧩 شماره بیرینگ:</b> {e_brg}</div>
+                            <div><b style='color:#1E3A8D;'>🧩 شماره بوش:</b> {e_bush}</div>
                         </div>
                         <div style='margin-top:14px; font-size:15px; color:#1E3A8D; background:#e6efff;
-                                    padding:8px 15px; border-radius:8px; display:inline-block;
-                                    font-family:Tahoma;'>
+                                    padding:8px 15px; border-radius:8px; display:block;
+                                    font-family:Tahoma; line-height:1.9; word-break:break-word;'>
                             <b>📍 راهنمای نقاط (P-Map):</b> {get_point_guide(eq_display, e_type)}
                         </div>
                     </div>
