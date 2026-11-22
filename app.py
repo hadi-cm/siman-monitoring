@@ -227,12 +227,14 @@ def logo(path, fallback):
         st.image(path, use_container_width=True)
     else:
         st.markdown(
-            "<div style='border:1px solid #d9e2ec;border-radius:10px;padding:14px;"
-            "text-align:center;color:#5b6b7c;font-size:13px'>\" + fallback + '</div>',
+            f"""
+            <div style='border:1px solid #d9e2ec; border-radius:10px; padding:14px; 
+            text-align:center; color:#5b6b7c; font-size:13px'>
+                {fallback}
+            </div>
+            """,
             unsafe_allow_html=True,
         )
-
-
 c1, c2, c3 = st.columns([1, 3, 1])
 with c1:
     logo('my_logo.png', 'لوگوی شما')
