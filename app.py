@@ -1,28 +1,15 @@
-<file_generation filename="app.py" format="py" content="# -- coding: utf-8 -*-
-"""
-سیستم هوشمند پایش وضعیت ارتعاش - سیمان تهران
-نسخه 8.0
-- فیلتر پویا: خط تولید ➔ واحد ➔ عنوان تجهیز (تجهیزات مستقیماً از شیت ارتعاشات)
-- حذف نمودارهای پیش‌فرض (نمودار فقط پس از انتخاب فیلتر)
-"""
 import os
 import html as html_lib
 from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import streamlit as st
-# ==============================================================================
-# 1) تنظیمات صفحه
-# ==============================================================================
 st.set_page_config(
     page_title='سیستم هوشمند پایش وضعیت-سیمان تهران',
     page_icon='📊',
     layout='wide',
 )
 APP_TITLE = 'سیستم هوشمند پایش وضعیت-سیمان تهران'
-# ==============================================================================
-# 2) پایگاه کاربران و دسترسی‌ها
-# ==============================================================================
 USER_DB = {
     'cm.zandiyeh@gmail.com':         {'name': 'هادی زندیه',     'role': 'پیمانکار / مالک سیستم', 'password': 'siman123'},
     'vah.rezaei@gmail.com':          {'name': 'وحید رضایی',     'role': 'مدیر مکانیک',           'password': 'siman123'},
@@ -42,9 +29,6 @@ def can_send(email):
 def can_edit(email):
     return email == OWNER_EMAIL
 
-# ==============================================================================
-# 3) تنظیمات فایل داده و نام ستون‌ها
-# ==============================================================================
 EXCEL_FILE = 'data.xlsx'
 SHEET_NAME = 'ارتعاشات'
 COL_DATE = 'تاریخ'
@@ -56,14 +40,10 @@ COL_V = 'ارتعاش عمودی (mm/s)'
 COL_A = 'ارتعاش محوری (mm/s)'
 COL_T = 'دمای بلبرینگ (°C)'
 COL_S = 'وضعیت'
-# ترتیب نمایش ترجیحی (هر موردی که در داده نبود، خودکار حذف می‌شود)
-LINE_PRIORITY = ['خط تولید ۳', 'خط تولید ۴', 'خط تولید ۶', 'خط تولید ۷', 'خط تولید ۸', 'خط تولید ۹']
+LINE_PRIORITY = ['خط تولید ۳', 'خط تولید ۴', 'خط تولید ۶',
+                 'خط تولید ۷', 'خط تولید ۸', 'خط تولید ۹']
 UNIT_PRIORITY = ['آسیاب سنگ', 'آسیاب مواد', 'کوره', 'آسیاب سیمان',
                  'بارگیرخانه تهران', 'بارگیرخانه ۶', 'بارگیرخانه ۹']
-
-# ==============================================================================
-# 4) داده نمونه (فقط برای وقتی که فایل اکسل موجود نیست)
-# ==============================================================================
 LINE_UNITS = {
     'خط تولید ۳': ['آسیاب سنگ', 'کوره', 'آسیاب سیمان'],
     'خط تولید ۴': ['آسیاب سنگ', 'آسیاب مواد', 'کوره', 'آسیاب سیمان'],
@@ -91,12 +71,12 @@ def build_sample_df():
     for line, units in LINE_UNITS.items():
         for unit in units:
             for eq in UNIT_COMPONENTS[unit]:
-                title = eq + ' — ' + unit
+                title = eq + ' - ' + unit
                 base = rng.uniform(1.5, 8.0)
                 for day in range(30):
                     amp_h = base  rng.uniform(0.85, 1.9)
                     amp_v = base  rng.uniform(0.85, 1.9)
-                    amp_a = base * rng.uniform(0.85, 1.9)
+                    amp_a = base  rng.uniform(0.85, 1.9)
                     temp = rng.uniform(45, 85)
                     worst = max(amp_h, amp_v, amp_a)
                     if worst < 4.5:
@@ -118,9 +98,9 @@ def build_sample_df():
                     })
     return pd.DataFrame(rows)
 
+
 @st.cache_data
 def load_data():
-    """خواندن شیت ارتعاشات؛ در صورت نبود فایل، داده نمونه."""
     for fname in (EXCEL_FILE, 'ارتعاشات.xlsx', 'ارتعاشات.xls'):
         if os.path.exists(fname):
             try:
@@ -132,8 +112,8 @@ def load_data():
                 return build_sample_df(), 'خطا در خواندن فایل: ' + str(exc)
     return build_sample_df(), 'داده نمونه (فایل اکسل پیدا نشد)'
 
+
 def prepare(df):
-    """یکسان‌سازی انواع داده و ساخت ستون وضعیت در صورت نبود."""
     df = df.copy()
     df[COL_DATE] = pd.to_datetime(df[COL_DATE], errors='coerce').dt.date
     for col in (COL_H, COL_V, COL_A, COL_T):
@@ -144,55 +124,59 @@ def prepare(df):
             df[col] = df[col].astype(str).str.strip()
     if COL_S not in df.columns:
         worst = df[[COL_H, COL_V, COL_A]].max(axis=1, skipna=True)
-        df[COL_S] = np.select(
-            [worst < 4.5, worst < 7.0], ['نرمال', 'هشدار'], default='بحرانی'
-        )
+        df[COL_S] = np.select([worst < 4.5, worst < 7.0],
+                              ['نرمال', 'هشدار'], default='بحرانی')
     return df
+
 
 raw_df, data_source = load_data()
 df_all = prepare(raw_df)
-missing = [c for c in (COL_DATE, COL_LINE, COL_UNIT, COL_EQUIP) if c not in df_all.columns]
+
+missing = [c for c in (COL_DATE, COL_LINE, COL_UNIT, COL_EQUIP)
+           if c not in df_all.columns]
+
 STATUS_EMOJI = {'نرمال': '🟢', 'هشدار': '🟡', 'بحرانی': '🔴'}
 
-# ==============================================================================
-# 5) توابع کمکی فیلتر
-# ==============================================================================
+
 def ordered(items, priority):
-    """ترتیب ترجیحی، سپس بقیه به‌صورت الفبایی — با حذف تکراری‌ها."""
-    items = [i for i in dict.fromkeys(items) if str(i) not in ('nan', 'None', '')]
-    head = [p for p in priority if p in items]
-    tail = sorted([i for i in items if i not in priority])
+    clean = []
+    for i in items:
+        s = str(i)
+        if s not in ('nan', 'None', '') and s not in clean:
+            clean.append(s)
+    head = [p for p in priority if p in clean]
+    tail = sorted([i for i in clean if i not in priority])
     return head + tail
 
-# ==============================================================================
-# 6) سازنده گزارش HTML (قابل چاپ / ذخیره PDF)
-# ==============================================================================
+
 REPORT_CSS = (
-    "<style>"
-    "@page{size:A4 landscape;margin:12mm}"
-    "body{font-family:Tahoma,'Vazirmatn',sans-serif;direction:rtl;text-align:right;color:#1f2d3d;padding:10px}"
-    "h1{font-size:20px;color:#0b3c6b;margin:0 0 4px 0}"
-    ".sub{font-size:12px;color:#6b7c8f;margin-bottom:14px}"
-    ".box{border:1px solid #d9e2ec;border-radius:8px;padding:10px 14px;margin-bottom:12px;"
-    "background:#f7fafc;font-size:13px;line-height:1.9}"
-    ".kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}"
-    ".kpi{flex:1 1 150px;border:1px solid #d9e2ec;border-radius:8px;padding:10px;text-align:center}"
-    ".kpi .v{font-size:18px;font-weight:bold;color:#0b3c6b}"
-    ".kpi .l{font-size:11px;color:#6b7c8f;margin-top:4px}"
-    "table{border-collapse:collapse;width:100%;font-size:11px}"
-    "th{background:#0b3c6b;color:#fff;padding:6px;border:1px solid #0b3c6b}"
-    "td{padding:5px 6px;border:1px solid #dfe7ef}"
-    "tbody tr:nth-child(even){background:#f4f7fa}"
-    ".foot{margin-top:14px;font-size:11px;color:#6b7c8f;text-align:center}"
-    ".crit{color:#b3261e;font-weight:bold}"
-    "</style>"
+    '<style>'
+    '@page{size:A4 landscape;margin:12mm}'
+    'body{font-family:Tahoma,sans-serif;direction:rtl;text-align:right;color:#1f2d3d;padding:10px}'
+    'h1{font-size:20px;color:#0b3c6b;margin:0 0 4px 0}'
+    '.sub{font-size:12px;color:#6b7c8f;margin-bottom:14px}'
+    '.box{border:1px solid #d9e2ec;border-radius:8px;padding:10px 14px;margin-bottom:12px;'
+    'background:#f7fafc;font-size:13px;line-height:1.9}'
+    '.kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}'
+    '.kpi{flex:1 1 150px;border:1px solid #d9e2ec;border-radius:8px;padding:10px;text-align:center}'
+    '.kpi .v{font-size:18px;font-weight:bold;color:#0b3c6b}'
+    '.kpi .l{font-size:11px;color:#6b7c8f;margin-top:4px}'
+    'table{border-collapse:collapse;width:100%;font-size:11px}'
+    'th{background:#0b3c6b;color:#fff;padding:6px;border:1px solid #0b3c6b}'
+    'td{padding:5px 6px;border:1px solid #dfe7ef}'
+    'tbody tr:nth-child(even){background:#f4f7fa}'
+    '.foot{margin-top:14px;font-size:11px;color:#6b7c8f;text-align:center}'
+    '.crit{color:#b3261e;font-weight:bold}'
+    '</style>'
 )
+
 
 def build_report_html(df_report, meta):
     esc = html_lib.escape
+
     if df_report.empty:
-        kpi_items = [('تعداد رکورد', '0'), ('میانگین ارتعاش افقی', '—'),
-                     ('میانگین دما', '—'), ('تجهیزات بحرانی', '—')]
+        kpi_items = [('تعداد رکورد', '0'), ('میانگین ارتعاش افقی', '-'),
+                     ('میانگین دما', '-'), ('تجهیزات بحرانی', '-')]
         table_html = '<p>برای این ترکیب فیلترها رکوردی یافت نشد.</p>'
     else:
         kpi_items = [
@@ -210,67 +194,69 @@ def build_report_html(df_report, meta):
                 val = row[c]
                 cell = esc(str(val))
                 if c == COL_S and str(val) == 'بحرانی':
-                    cell = '<span class="crit">' + cell + '</span>'
+                    cell = '<span class=\"crit\">' + cell + '</span>'
                 cells += '<td>' + cell + '</td>'
             body += '<tr>' + cells + '</tr>'
-        table_html = '<table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table>'
+        table_html = ('<table><thead><tr>' + head + '</tr></thead><tbody>'
+                      + body + '</tbody></table>')
+
     kpis = ''
     for label, value in kpi_items:
-        kpis += '<div class="kpi"><div class="v">' + esc(value) + '</div>'
-        kpis += '<div class="l">' + esc(label) + '</div></div>'
+        kpis += '<div class=\"kpi\"><div class=\"v\">' + esc(value) + '</div>'
+        kpis += '<div class=\"l\">' + esc(label) + '</div></div>'
+
     info_lines = ''
     for key, value in meta.items():
         info_lines += '<div><b>' + esc(str(key)) + ':</b> ' + esc(str(value)) + '</div>'
-    html_doc = (
-        "<!DOCTYPE html><html lang='fa' dir='rtl'><head><meta charset='utf-8'>"
-        '<title>گزارش پایش ارتعاش — سیمان تهران</title>' + REPORT_CSS + '</head><body>'
-        '<h1>گزارش پایش وضعیت ارتعاش — سیمان تهران</h1>'
-        '<div class="sub">تاریخ گزارش: ' + esc(datetime.now().strftime('%Y-%m-%d %H:%M')) + '</div>'
-        '<div class="box">' + info_lines + '</div>'
-        '<div class="kpis">' + kpis + '</div>'
+
+    return (
+        \"<!DOCTYPE html><html lang='fa' dir='rtl'><head><meta charset='utf-8'>\"
+        '<title>گزارش پایش ارتعاش - سیمان تهران</title>' + REPORT_CSS + '</head><body>'
+        '<h1>گزارش پایش وضعیت ارتعاش - سیمان تهران</h1>'
+        '<div class=\"sub\">تاریخ گزارش: ' + esc(datetime.now().strftime('%Y-%m-%d %H:%M')) + '</div>'
+        '<div class=\"box\">' + info_lines + '</div>'
+        '<div class=\"kpis\">' + kpis + '</div>'
         + table_html +
-        '<div class="foot">این گزارش به‌صورت خودکار توسط سامانه پایش وضعیت تولید شده است.</div>'
+        '<div class=\"foot\">این گزارش به‌صورت خودکار توسط سامانه پایش وضعیت تولید شده است.</div>'
         '</body></html>'
     )
-    return html_doc
 
-# ==============================================================================
-# 7) هدر و لوگوها
-# ==============================================================================
+
 def logo(path, fallback):
     if os.path.exists(path):
         st.image(path, use_container_width=True)
     else:
         st.markdown(
-            "<div style='border:1px solid #d9e2ec;border-radius:10px;padding:14px;"
-            "text-align:center;color:#5b6b7c;font-size:13px'>" + fallback + '</div>',
+            \"<div style='border:1px solid #d9e2ec;border-radius:10px;padding:14px;\"
+            \"text-align:center;color:#5b6b7c;font-size:13px'>\" + fallback + '</div>',
             unsafe_allow_html=True,
         )
+
 
 c1, c2, c3 = st.columns([1, 3, 1])
 with c1:
     logo('my_logo.png', 'لوگوی شما')
 with c2:
     st.markdown(
-        "<h2 style='text-align:center;color:#0b3c6b;margin-bottom:0'>" + APP_TITLE + '</h2>'
-        "<p style='text-align:center;color:#7a8794;font-size:13px;margin-top:4px'>"
+        \"<h2 style='text-align:center;color:#0b3c6b;margin-bottom:0'>\" + APP_TITLE + '</h2>'
+        \"<p style='text-align:center;color:#7a8794;font-size:13px;margin-top:4px'>\"
         'پایش برخط ارتعاش و دمای تجهیزات</p>',
         unsafe_allow_html=True,
     )
 with c3:
     logo('client_logo.png', 'سیمان تهران')
 
-# ==============================================================================
-# 8) ورود به سامانه
-# ==============================================================================
+
 if 'user' not in st.session_state:
     st.session_state.user = None
+
 if st.session_state.user is None:
     st.markdown('### 🔐 ورود به سامانه')
     with st.form('login_form'):
         email = st.text_input('ایمیل سازمانی', placeholder='name@example.com')
         password = st.text_input('رمز عبور', type='password')
         submitted = st.form_submit_button('ورود به داشبورد', use_container_width=True)
+
     if submitted:
         email = (email or '').strip().lower()
         if email in USER_DB and USER_DB[email]['password'] == password:
@@ -280,22 +266,22 @@ if st.session_state.user is None:
             st.error('این ایمیل در سامانه ثبت نشده است.')
         else:
             st.error('رمز عبور نادرست است.')
+
     st.caption('رمز پیش‌فرض تمام کاربران: siman123')
     st.stop()
+
 
 user_email = st.session_state.user
 user_info = USER_DB[user_email]
 is_sender = can_send(user_email)
 is_editor = can_edit(user_email)
 
-# ==============================================================================
-# 9) نوار کاربر
-# ==============================================================================
+
 u1, u2, u3 = st.columns([3, 2, 1])
 with u1:
     st.markdown(
-        '👤 *' + user_info['name'] + ' &nbsp;—&nbsp; `' + user_email +
-        '` &nbsp;|&nbsp; نقش: ' + user_info['role'] + '*'
+        '👤 ' + user_info['name'] + ' &nbsp;—&nbsp; `' + user_email +
+        '` &nbsp;|&nbsp; نقش: ' + user_info['role'] + ''
     )
 with u2:
     st.caption(
@@ -306,43 +292,45 @@ with u3:
     if st.button('خروج', use_container_width=True):
         st.session_state.user = None
         st.rerun()
+
 st.divider()
+
 if missing:
-    st.error(
-        'این ستون‌ها در شیت پیدا نشد: ' + '، '.join(missing) +
-        ' — نام ستون‌ها را در بالای کد اصلاح کنید.'
-    )
+    st.error('این ستون‌ها در شیت پیدا نشد: ' + '، '.join(missing) +
+             ' - نام ستون‌ها را در بالای کد اصلاح کنید.')
     st.stop()
-# ==============================================================================
-# 10) فیلترها: خط تولید ➔ واحد ➔ عنوان تجهیز
-# ==============================================================================
+
+
 st.markdown('#### 🔎 فیلترها (خط تولید ➔ واحد ➔ تجهیز)')
 st.caption('منبع داده: ' + data_source)
+
 f1, f2, f3, f4, f5 = st.columns([2, 2, 3, 2, 2])
-# ---------- سطح ۱: خط تولید ----------
+
 lines_available = ordered(df_all[COL_LINE].dropna().unique().tolist(), LINE_PRIORITY)
 with f1:
     sel_line = st.selectbox('۱) خط تولید', ['همه خطوط'] + lines_available)
-# ---------- سطح ۲: واحد (فقط واحدهای موجود در همان خط) ----------
+
 if sel_line == 'همه خطوط':
     unit_src = df_all
 else:
     unit_src = df_all[df_all[COL_LINE] == sel_line]
+
 units_available = ordered(unit_src[COL_UNIT].dropna().unique().tolist(), UNIT_PRIORITY)
+
 with f2:
-    sel_unit = st.selectbox(
-        '۲) واحد', ['همه واحدها'] + units_available,
-        key='unit_of_' + sel_line,
-    )
-# ---------- سطح ۳: عنوان تجهیز (از خود شیت، بر اساس خط + واحد) ----------
+    sel_unit = st.selectbox('۲) واحد', ['همه واحدها'] + units_available,
+                            key='unit_of_' + sel_line)
+
 eq_src = unit_src
 if sel_unit != 'همه واحدها':
     eq_src = eq_src[eq_src[COL_UNIT] == sel_unit]
+
 equips_available = ordered(eq_src[COL_EQUIP].dropna().unique().tolist(), [])
+
 with f3:
     if not equips_available:
         sel_equip = []
-        st.selectbox('۳) عنوان تجهیز', ['—'], disabled=True)
+        st.selectbox('۳) عنوان تجهیز', ['-'], disabled=True)
     elif len(equips_available) == 1:
         sel_equip = [st.selectbox('۳) عنوان تجهیز', equips_available,
                                   key='eq_single_' + sel_line + '_' + sel_unit)]
@@ -353,57 +341,64 @@ with f3:
             default=['همه تجهیزات'],
             key='eq_multi_' + sel_line + '_' + sel_unit,
         )
-# ---------- سطح ۴: وضعیت ----------
+
 with f4:
     sel_status = st.multiselect(
         'وضعیت', ['نرمال', 'هشدار', 'بحرانی'], default=['هشدار', 'بحرانی']
     )
-# ---------- سطح ۵: بازه زمانی ----------
+
 with f5:
     days = st.slider('بازه روزهای اخیر', 1, 30, 7)
-# ---------- مسیر فیلتر ----------
+
 path_parts = [sel_line]
 if sel_unit != 'همه واحدها':
     path_parts.append(sel_unit)
 if sel_equip and 'همه تجهیزات' not in sel_equip:
     path_parts.append('، '.join(sel_equip))
 filter_path_text = ' ➔ '.join(path_parts)
-st.caption('**مسیر فیلتر:** ' + filter_path_text)
-# ---------- اعمال فیلتر روی داده ----------
+st.caption('مسیر فیلتر: ' + filter_path_text)
+
 start_date = datetime.now().date() - timedelta(days=days - 1)
+
 df = df_all[df_all[COL_DATE] >= start_date].copy()
+
 if sel_line != 'همه خطوط':
     df = df[df[COL_LINE] == sel_line]
+
 if sel_unit != 'همه واحدها':
     df = df[df[COL_UNIT] == sel_unit]
+
 if sel_equip and 'همه تجهیزات' not in sel_equip:
     df = df[df[COL_EQUIP].isin(sel_equip)]
+
 if sel_status:
     df = df[df[COL_S].isin(sel_status)]
-# آیا کاربر فیلتر مشخصی انتخاب کرده است؟
+
 filter_is_specific = (
     sel_line != 'همه خطوط'
     or sel_unit != 'همه واحدها'
     or (bool(sel_equip) and 'همه تجهیزات' not in sel_equip)
 )
+
 st.divider()
 
-# ==============================================================================
-# 11) تب‌ها
-# ==============================================================================
+
 tab1, tab2, tab3, tab4 = st.tabs(
     ['📋 جدول داده‌ها', '📈 نمودارها', '📨 ارسال اعلان', '👥 کاربران']
 )
-# ---------- تب ۱ ----------
+
 with tab1:
-    st.markdown('**تعداد رکوردها:** ' + '{:,}'.format(len(df)))
+    st.markdown('تعداد رکوردها: ' + '{:,}'.format(len(df)))
+
     if df.empty:
         st.info('با این فیلترها رکوردی یافت نشد.')
     else:
         styled = df.copy()
         styled[COL_S] = styled[COL_S].map(lambda s: STATUS_EMOJI.get(s, '') + ' ' + str(s))
         st.dataframe(styled, use_container_width=True, height=460)
+
         d1, d2 = st.columns(2)
+
         with d1:
             st.download_button(
                 '⬇️ دانلود CSV',
@@ -412,12 +407,14 @@ with tab1:
                 mime='text/csv',
                 use_container_width=True,
             )
+
         with d2:
             report_meta = {
                 'مسیر فیلتر': filter_path_text,
-                'بازه زمانی': str(days) + ' روز اخیر (از ' + str(start_date) + ' تا ' + str(datetime.now().date()) + ')',
+                'بازه زمانی': str(days) + ' روز اخیر (از ' + str(start_date) +
+                              ' تا ' + str(datetime.now().date()) + ')',
                 'وضعیت‌های انتخابی': '، '.join(sel_status) if sel_status else 'همه',
-                'تهیه‌کننده': user_info['name'] + ' — ' + user_info['role'],
+                'تهیه‌کننده': user_info['name'] + ' - ' + user_info['role'],
             }
             st.download_button(
                 '🧾 دانلود گزارش (HTML قابل چاپ به PDF)',
@@ -426,8 +423,9 @@ with tab1:
                 mime='text/html',
                 use_container_width=True,
             )
+
         st.caption('برای PDF: فایل گزارش را در مرورگر باز کنید و با Ctrl+P گزینه Save as PDF را بزنید.')
-# ---------- تب ۲ ----------
+
 with tab2:
     if df.empty:
         st.info('داده‌ای برای نمودار نیست.')
@@ -439,35 +437,41 @@ with tab2:
         m2.metric('میانگین ارتعاش عمودی', '{:.2f} mm/s'.format(df[COL_V].mean()))
         m3.metric('میانگین دما', '{:.1f} °C'.format(df[COL_T].mean()))
         m4.metric('تجهیزات بحرانی', int((df[COL_S] == 'بحرانی').sum()))
+
         daily = df.groupby(COL_DATE)[[COL_H, COL_V, COL_A]].mean()
-        st.markdown('**روند میانگین ارتعاش روزانه**')
+        st.markdown('روند میانگین ارتعاش روزانه')
         st.line_chart(daily)
-        st.markdown('**میانگین دما بر اساس تجهیز**')
+
+        st.markdown('میانگین دما بر اساس تجهیز')
         st.bar_chart(df.groupby(COL_EQUIP)[COL_T].mean())
-# ---------- تب ۳ ----------
+
 with tab3:
     crit = df[df[COL_S] == 'بحرانی'].sort_values(COL_H, ascending=False)
-    st.markdown('**تجهیزات نیازمند توجه (بحرانی)**')
+
+    st.markdown('تجهیزات نیازمند توجه (بحرانی)')
     if crit.empty:
         st.success('در این بازه تجهیز بحرانی وجود ندارد.')
     else:
         show = crit[[COL_LINE, COL_UNIT, COL_EQUIP, COL_H, COL_V, COL_T, COL_S]]
         st.dataframe(show, use_container_width=True, height=280)
-    st.markdown('**پیش‌نویس اعلان**')
+
+    st.markdown('پیش‌نویس اعلان')
     all_emails = list(USER_DB.keys())
     recipients = st.multiselect(
         'گیرندگان', all_emails, default=all_emails,
-        format_func=lambda e: USER_DB[e]['name'] + ' — ' + e,
+        format_func=lambda e: USER_DB[e]['name'] + ' - ' + e,
     )
+
     subject = st.text_input(
-        'موضوع', 'هشدار ارتعاش — سیمان تهران — ' + datetime.now().strftime('%Y/%m/%d')
+        'موضوع', 'هشدار ارتعاش - سیمان تهران - ' + datetime.now().strftime('%Y/%m/%d')
     )
+
     if crit.empty:
         body = 'در بازه انتخاب‌شده تجهیز بحرانی گزارش نشده است.'
     else:
         top = crit.head(10)
         lines = [
-            'گزارش وضعیت تجهیزات بحرانی — ' + datetime.now().strftime('%Y/%m/%d'),
+            'گزارش وضعیت تجهیزات بحرانی - ' + datetime.now().strftime('%Y/%m/%d'),
             'بازه: ' + str(days) + ' روز اخیر | فیلتر: ' + filter_path_text +
             ' | تعداد بحرانی: ' + str(len(crit)),
             '',
@@ -475,13 +479,15 @@ with tab3:
         ]
         for i, (_, r) in enumerate(top.iterrows(), 1):
             lines.append(
-                str(i) + '. ' + str(r[COL_EQUIP]) + ' (' + str(r[COL_LINE]) + ' / ' +
-                str(r[COL_UNIT]) + ') — افقی ' + str(r[COL_H]) +
+                str(i) + '. ' + str(r[COL_EQUIP]) + ' (' + str(r[COL_LINE]) +
+                ' / ' + str(r[COL_UNIT]) + ') - افقی ' + str(r[COL_H]) +
                 ' | عمودی ' + str(r[COL_V]) + ' | دما ' + str(r[COL_T]) + '°C'
             )
-        lines += ['', 'ارسال‌کننده: ' + user_info['name'] + ' — ' + user_info['role']]
+        lines += ['', 'ارسال‌کننده: ' + user_info['name'] + ' - ' + user_info['role']]
         body = chr(10).join(lines)
+
     body = st.text_area('متن پیام', body, height=240)
+
     if is_sender:
         if st.button('📨 ارسال اعلان', type='primary', use_container_width=True):
             st.session_state.setdefault('sent_log', []).append({
@@ -494,9 +500,10 @@ with tab3:
             st.success('اعلان برای ' + str(len(recipients)) + ' گیرنده ثبت شد (شبیه‌سازی ارسال).')
     else:
         st.button('📨 ارسال اعلان', disabled=True, use_container_width=True)
-        st.caption('⛔ شما مجوز ارسال اعلان ندارید — مشاهده باز است، ارسال فقط برای مدیران.')
+        st.caption('⛔ شما مجوز ارسال اعلان ندارید - مشاهده باز است، ارسال فقط برای مدیران.')
+
     st.divider()
-    st.markdown('**تاریخچه اعلان‌ها**')
+    st.markdown('تاریخچه اعلان‌ها')
     log = st.session_state.get('sent_log', [])
     if log:
         log_df = pd.DataFrame(log)
@@ -509,9 +516,9 @@ with tab3:
         )
     else:
         st.caption('هنوز اعلانی ارسال نشده است.')
-# ---------- تب ۴ ----------
+
 with tab4:
-    st.markdown('**کاربران سامانه**')
+    st.markdown('کاربران سامانه')
     rows = [{
         'نام': v['name'],
         'ایمیل': k,
@@ -520,11 +527,12 @@ with tab4:
         'ارسال اعلان': '✅' if can_send(k) else '⛔',
     } for k, v in USER_DB.items()]
     st.dataframe(pd.DataFrame(rows), use_container_width=True, height=320)
+
     if is_editor:
-        st.markdown('**ویرایش رمز کاربر**')
+        st.markdown('ویرایش رمز کاربر')
         target = st.selectbox(
             'کاربر', list(USER_DB.keys()),
-            format_func=lambda e: USER_DB[e]['name'] + ' — ' + e,
+            format_func=lambda e: USER_DB[e]['name'] + ' - ' + e,
         )
         new_pass = st.text_input('رمز جدید', type='password')
         if st.button('ذخیره تغییرات', type='primary'):
@@ -535,6 +543,7 @@ with tab4:
                 st.warning('رمز جدید را وارد کنید.')
     else:
         st.caption('✏️ تغییر داده‌ها فقط توسط مالک سیستم امکان‌پذیر است.')
+
 st.divider()
-st.caption('آخرین به‌روزرسانی: ' + datetime.now().strftime('%Y-%m-%d %H:%M') + ' — سیمان تهران')
+st.caption('آخرین به‌روزرسانی: ' + datetime.now().strftime('%Y-%m-%d %H:%M') + ' - سیمان تهران')
 "/>
