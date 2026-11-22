@@ -620,7 +620,6 @@ def build_report_html(show, equip_title, caption_dates):
 # بارگذاری داده
 # ============================================================
 if not SHEET_ID:
-    st.title("📈 سامانه پایش وضعیت ارتعاشات")
     st.error("شناسه شیت (SHEET_ID) تنظیم نشده است.")
     st.info(
         "در بخش Secrets برنامه، مقدار SHEET_ID را برابر شناسه فایل گوگل‌شیت قرار بده.\n\n"
@@ -645,7 +644,6 @@ with c3:
     if os.path.exists("client_logo.png"):
         st.image("client_logo.png", width=90)
 
-st.title("📈 سامانه پایش وضعیت ارتعاشات")
 st.caption("نمایش نقطه‌به‌نقطه، اتصال شماره بیرینگ از شیت Assets و گزارش قابل چاپ")
 
 if vib.empty:
