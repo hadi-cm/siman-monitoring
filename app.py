@@ -1,5 +1,3 @@
-
-
 <file_generation filename="app.py" format="py" content="# -- coding: utf-8 -*-
 """
 سیستم هوشمند پایش وضعیت ارتعاش - سیمان تهران
