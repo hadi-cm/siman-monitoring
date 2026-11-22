@@ -240,7 +240,7 @@ with c1:
     logo('my_logo.png', 'لوگوی شما')
 with c2:
     st.markdown(
-        "<h2 style='text-align:center;color:#0b3c6b;margin-bottom:0'>\" + APP_TITLE + '</h2>'
+        f"<h2 style='text-align:center;color:#0b3c6b;margin-bottom:0'>{APP_TITLE}</h2>", unsafe_allow_html=True)
         "<p style='text-align:center;color:#7a8794;font-size:13px;margin-top:4px'>\"
         'پایش برخط ارتعاش و دمای تجهیزات</p>',
         unsafe_allow_html=True,
