@@ -668,86 +668,59 @@ if asr_raw.empty:
 # ============================================================
 # فیلترها
 # ============================================================
-st.sidebar.header("🔎 فیلترها")
-
-equip_options = sorted({e for e in vib["عنوان تجهیز"].tolist() if str(e).strip()})
-if not equip_options:
-    st.error("هیچ تجهیزی در شیت ارتعاشات شناسایی نشد.")
-    st.info("ستون «عنوان تجهیز» را در شیت بررسی کن. سرستون‌های فعلی: %s" % list(vib_raw.columns))
-    st.stop()
-
-equip = st.sidebar.selectbox("تجهیز", equip_options, index=0)
-equip_df = vib[vib["عنوان تجهیز"] == equip].copy()
-
-date_list = (
-    equip_df[["تاریخ", "_date_key"]]
-    .drop_duplicates()
-    .sort_values("_date_key", ascending=False)["تاریخ"]
-    .tolist()
-)
-date_list = [d for d in date_list if str(d).strip()]
-
-mode = st.sidebar.radio(
-    "بازه تاریخ",
-    ["همه تاریخ‌ها", "بازه تاریخی", "تاریخ‌های خاص"],
-    index=0,
-)
-
-selected_dates = date_list
-caption_dates = "همه تاریخ‌های موجود"
-start_txt = date_list[-1] if date_list else "-"
-end_txt = date_list[0] if date_list else "-"
-
-if mode == "بازه تاریخی" and date_list:
-    ordered = sorted(date_list, key=lambda x: date_key(parse_date(x)))
-    if len(ordered) == 1:
-        start = end = ordered[0]
-    else:
-        cc1, cc2 = st.sidebar.columns(2)
-        start = cc1.selectbox("از تاریخ", ordered, index=0)
-        end = cc2.selectbox("تا تاریخ", ordered, index=len(ordered) - 1)
-    k1, k2 = date_key(parse_date(start)), date_key(parse_date(end))
-    if k1 > k2:
-        k1, k2 = k2, k1
-        start, end = end, start
-    selected_dates = [d for d in ordered if k1 <= date_key(parse_date(d)) <= k2]
-    caption_dates = "از %s تا %s" % (start, end)
-    start_txt, end_txt = start, end
-
-elif mode == "تاریخ‌های خاص":
-    picked = st.sidebar.multiselect(
-        "تاریخ‌ها را انتخاب کن", date_list, default=date_list[:1]
+st.sidebar.subheader("🔍 فیلترها")
+dff = df.copy()
+# فیلتر خط تولید
+col_line = "خط تولید" if "خط تولید" in dff.columns else None
+if col_line:
+    lines = sorted(dff[col_line].dropna().astype(str).unique())
+    sel_line = st.sidebar.multiselect("خط تولید", lines, placeholder="همه خطوط")
+    if sel_line:
+        dff = dff[dff[col_line].astype(str).isin(sel_line)]
+# فیلتر واحد
+col_unit = "واحد" if "واحد" in dff.columns else None
+if col_unit:
+    units = sorted(dff[col_unit].dropna().astype(str).unique())
+    sel_unit = st.sidebar.multiselect("واحد", units, placeholder="همه واحدها")
+    if sel_unit:
+        dff = dff[dff[col_unit].astype(str).isin(sel_unit)]
+# فیلتر تجهیز
+col_eq = "عنوان تجهیز" if "عنوان تجهیز" in dff.columns else ("تجهیز" if "تجهیز" in dff.columns else None)
+if col_eq:
+    eqs = sorted(dff[col_eq].dropna().astype(str).unique())
+    sel_eq = st.sidebar.multiselect("تجهیز", eqs, placeholder="همه تجهیزات")
+    if sel_eq:
+        dff = dff[dff[col_eq].astype(str).isin(sel_eq)]
+# محاسبه وضعیت و اعلانیه‌ها
+WARN_LIMIT = 4.5
+CRIT_LIMIT = 7.1
+num_cols = [c for c in dff.columns if c in ["افقی", "عمودی", "محوری"]]
+for c in num_cols:
+    dff[c] = pd.to_numeric(dff[c], errors="coerce")
+if num_cols:
+    dff["حداکثر"] = dff[num_cols].max(axis=1)
+    dff["وضعیت"] = dff["حداکثر"].apply(
+        lambda v: "🔴 بحرانی" if pd.notna(v) and v >= CRIT_LIMIT
+        else ("🟡 هشدار" if pd.notna(v) and v >= WARN_LIMIT else "🟢 سالم")
     )
-    selected_dates = picked
-    caption_dates = "، ".join(picked) if picked else "بدون انتخاب"
-    if picked:
-        start_txt = min(picked, key=lambda x: date_key(parse_date(x)))
-        end_txt = max(picked, key=lambda x: date_key(parse_date(x)))
-
-if not selected_dates:
-    st.warning("هیچ تاریخی انتخاب نشده است.")
-    st.stop()
-
-show = equip_df[equip_df["تاریخ"].isin(selected_dates)].copy()
-show = ensure_cols(show, VIEW_COLS)
-show = show.sort_values(["_date_key", "_ord"], ascending=[False, True])
-
-with st.sidebar.expander("ℹ️ وضعیت خوانش داده"):
-    st.write("ردیف خام ارتعاشات:", len(vib_raw))
-    st.write("ردیف معتبر:", len(vib))
-    st.write("تعداد تجهیز:", len(equip_options))
-    st.write("ردیف شیت Assets:", len(asr_raw))
-    st.write("تاریخ‌های این تجهیز:", len(date_list))
-
-mx_all = show["حداکثر"].max() if not show.empty else None
-
-mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-mcol1.metric("حداکثر ارتعاش در انتخاب", ("%.2f mm/s" % mx_all) if mx_all is not None else "—")
-mcol2.metric("تعداد ردیف", len(show))
-mcol3.metric("تعداد نقاط", show["نقطه"].nunique())
-crit_count = int(show["وضعیت"].astype(str).str.contains("بحرانی").sum())
-mcol4.metric("ردیف بحرانی", crit_count)
-
+# نمایش اعلانیه‌ها در باکس بازشو
+critical = dff[dff["وضعیت"] == "🔴 بحرانی"] if "وضعیت" in dff.columns else dff.iloc[0:0]
+warning  = dff[dff["وضعیت"] == "🟡 هشدار"]  if "وضعیت" in dff.columns else dff.iloc[0:0]
+n_alerts = len(critical) + len(warning)
+with st.expander(f"🔔 اعلانیه‌ها — {n_alerts} مورد", expanded=False):
+    if n_alerts == 0:
+        st.success("✅ هیچ اعلانیه‌ای وجود ندارد.")
+    else:
+        show_cols = [c for c in ["تاریخ شمسی", "خط تولید", "واحد", "عنوان تجهیز", "حداکثر", "وضعیت"] if c in dff.columns]
+        if len(critical):
+            st.markdown(f"### 🔴 بحرانی — {len(critical)} مورد")
+            st.dataframe(critical[show_cols], use_container_width=True, hide_index=True)
+        if len(warning):
+            st.markdown(f"### 🟡 هشدار — {len(warning)} مورد")
+            st.dataframe(warning[show_cols], use_container_width=True, hide_index=True)
+# نمایش جدول اصلی در بدنه صفحه
+st.subheader("📊 جدول وضعیت")
+st.dataframe(dff, use_container_width=True, hide_index=True)
 # ============================================================
 # تب‌ها
 # ============================================================
