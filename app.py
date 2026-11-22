@@ -1,874 +1,901 @@
 # -*- coding: utf-8 -*-
 """
-====================================================================
- سامانه هوشمند پایش وضعیت ارتعاشات - سیمان تهران
- نسخه نهایی: نمایش نقطه به نقطه (P1..P11) + شماره بیرینگ از شیت Assets
-====================================================================
+سامانه پایش وضعیت ارتعاشات — نسخه ۲.۰ (ضد KeyError)
+=====================================================
+ویژگی‌ها:
+  • خواندن دو شیت «ارتعاشات» و «Assets» از همان فایل گوگل شیت
+  • تشخیص هوشمند نام ستون‌ها (فاصله، نیم‌فاصله، ی/ك عربی، حروف بزرگ، غلط تایپی)
+  • هیچ‌وقت KeyError نمی‌دهد؛ ستون پیدا نشود، خالی ساخته می‌شود
+  • نمایش نقطه‌به‌نقطه (P1..P11) به جای تجمیع «حداکثر»
+  • شماره بیرینگ از شیت Assets و در صورت نبود از خود شیت ارتعاشات
+  • شرح فارسی نقاط در دیکشنری POINT_LABELS
+  • فیلتر تاریخ بعد از انتخاب تجهیز: همه / بازه / تاریخ‌های خاص
+  • نمودار، گزارش HTML قابل چاپ، CSV، پیش‌نویس اعلان و تب کاربران
 """
 
+import io
 import os
 import re
-import html
-from datetime import datetime, date, timedelta
+import datetime as dt
 
-import numpy as np
 import pandas as pd
+import requests
 import streamlit as st
-import plotly.express as px
-import plotly.graph_objects as go
 
-# ==================================================================
-# 1) تنظیمات اصلی
-# ==================================================================
-APP_TITLE = "سامانه هوشمند پایش وضعیت - سیمان تهران"
-APP_SUB = "پایش ارتعاش تجهیزات دوار"
+# ============================================================
+# تنظیمات پایه
+# ============================================================
+st.set_page_config(page_title="سامانه پایش ارتعاشات", page_icon="📈", layout="wide")
 
-LOGO_MINE = "my_logo.png"
-LOGO_CLIENT = "client_logo.png"
 
-VIB_CSV_URL = ("https://docs.google.com/spreadsheets/d/e/"
-               "2PACX-1vTI4vONsowudctVbskGkkSyQNqkkGZ8AuiykO9UKeE-8FSBZemWkR4q5DSAhpXEqwQkgsCUQy44Vvqx"
-               "/pub?output=csv")
-ASSET_CSV_URL = VIB_CSV_URL + "&gid=1728784730"
+def _secret(key, default):
+    try:
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
 
-# آستانه‌های هشدار (mm/s RMS)
-TH_WARN = 4.5
-TH_CRIT = 7.0
 
-USER_DB = {
-    'cm.zandiyeh@gmail.com':         {'name': 'هادی زندیه',      'role': 'پیمانکار / مالک سیستم', 'password': 'siman123'},
-    'vah.rezaei@gmail.com':          {'name': 'وحید رضایی',      'role': 'مدیر مکانیک',           'password': 'siman123'},
-    'me.vibration.shokri@gmail.com': {'name': 'مهدی شکری',       'role': 'مدیر دفتر فنی',         'password': 'siman123'},
-    'tehrancment@gmail.com':         {'name': 'سید مهدی حسینی',  'role': 'معاونت فنی',            'password': 'siman123'},
-    'alireza76ir@gmail.com':         {'name': 'علیرضا',          'role': 'کارشناس',               'password': 'siman123'},
-    'masoud.sa.1989823@gmail.com':   {'name': 'مسعود صمیمی',     'role': 'کارشناس',               'password': 'siman123'},
-    'operator2@tehrancment.ir':      {'name': 'اپراتور خط ۲',    'role': 'کاربر',                 'password': 'siman123'},
-}
-OWNER_EMAIL = 'cm.zandiyeh@gmail.com'
-SEND_ROLES = ('مدیر', 'معاونت', 'مالک')
+SHEET_ID = str(_secret("SHEET_ID", "")).strip()
+SHEET_VIB = "ارتعاشات"
+SHEET_ASSETS = "Assets"
 
-# شرح پیش‌فرض نقاط اندازه‌گیری (قابل ویرایش)
+WARN_LIMIT = 4.5   # mm/s
+CRIT_LIMIT = 7.0   # mm/s
+
+# ---- شرح نقاط (قابل ویرایش) ----
 POINT_LABELS = {
-    'P1': 'انتهای موتور',
-    'P2': 'سر موتور (سمت کوپلینگ)',
-    'P3': 'یاتاقان سمت ثابت (فیکس)',
-    'P4': 'یاتاقان سمت آزاد',
-    'P5': 'نقطه ۵',
-    'P6': 'نقطه ۶',
-    'P7': 'نقطه ۷',
-    'P8': 'نقطه ۸',
-    'P9': 'نقطه ۹',
-    'P10': 'نقطه ۱۰',
-    'P11': 'نقطه ۱۱',
+    "P1": "انتهای موتور",
+    "P2": "سر موتور (سمت کوپلینگ)",
+    "P3": "یاتاقان سمت فیکس میل فن",
+    "P4": "یاتاقان سمت آزاد میل فن",
 }
 
-LINE_PRIORITY = ["خط تولید 1", "خط تولید 2", "خط تولید 3", "خط تولید 4",
-                 "خط تولید 5", "خط تولید 6", "خط تولید 7", "خط تولید 8",
-                 "خط تولید 9"]
-UNIT_PRIORITY = ["سنگ شکن", "آسیاب مواد", "آسیاب سیمان", "کوره",
-                 "بارگیرخانه", "بارگیرخانه ۶", "بارگیرخانه ۹"]
+# ---- نام‌های محتمل ستون‌ها ----
+COLUMNS = {
+    "date":     ["تاریخ", "تاریخ ثبت", "تاریخ اندازه گیری", "تاریخ تست"],
+    "line":     ["خط تولید", "خط"],
+    "unit":     ["واحد"],
+    "equip":    ["عنوان تجهیز", "نام تجهیز", "تجهیز", "مکان", "محل نصب"],
+    "point":    ["تصویر", "نقطه", "شماره نقطه", "محل اندازه گیری"],
+    "h":        ["افقی"],
+    "v":        ["عمودی"],
+    "a":        ["محوری"],
+    "temp":     ["دما", "دمای", "درجه حرارت"],
+    "desc":     ["توضیحات", "شرح"],
+    "status":   ["وضعیت"],
+    "bearing":  ["شماره بیرینگ", "بیرینگ"],
+    "action":   ["اقدام اصلاحی", "اقدام"],
+    "cost":     ["هزینه"],
+    "priority": ["اولویت", "الویت"],
+}
 
-# نام ستون‌های استاندارد داخلی
-C_DATE, C_JDATE = "تاریخ", "تاریخ شمسی"
-C_LINE, C_UNIT, C_EQ = "خط تولید", "واحد", "عنوان تجهیز"
-C_PT, C_PTNAME = "نقطه", "شرح نقطه"
-C_BRG = "شماره بیرینگ"
-C_H, C_V, C_A, C_T = "افقی", "عمودی", "محوری", "دما"
-C_ST, C_DESC, C_ACT, C_COST, C_PRI = "وضعیت", "توضیحات", "اقدام اصلاحی", "هزینه", "اولویت"
+ASSET_COLUMNS = {
+    "equip":   ["نام تجهیز", "عنوان تجهیز", "تجهیز"],
+    "point":   ["راهنمایی نقاط", "نقطه", "شماره نقطه"],
+    "bearing": ["شماره بیرینگ", "بیرینگ"],
+    "bush":    ["بوش"],
+    "rpm":     ["دور نامی"],
+}
 
-FA_DIGITS = "۰۱۲۳۴۵۶۷۸۹"
-AR_DIGITS = "٠١٢٣٤٥٦٧٨٩"
+VIEW_COLS = [
+    "تاریخ", "خط تولید", "واحد", "عنوان تجهیز", "نقطه", "شرح نقطه",
+    "شماره بیرینگ", "افقی", "عمودی", "محوری", "حداکثر", "دما",
+    "وضعیت", "توضیحات", "اقدام اصلاحی", "اولویت", "هزینه",
+]
 
-# ==================================================================
-# 2) ابزارهای متنی و عددی
-# ==================================================================
-def to_latin(v) -> str:
-    """ارقام فارسی/عربی به لاتین + حذف کشیده و نویسه‌های کنترلی"""
-    if v is None:
+REPORT_COLS = [
+    "تاریخ", "خط تولید", "واحد", "عنوان تجهیز", "نقطه", "شرح نقطه",
+    "شماره بیرینگ", "افقی", "عمودی", "محوری", "دما", "وضعیت",
+]
+
+NUM_COLS = ["افقی", "عمودی", "محوری", "حداکثر", "دما"]
+
+# ============================================================
+# ابزارهای متنی و عددی
+# ============================================================
+FA_DIGITS = str.maketrans(
+    "۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"
+)
+
+EMPTY_TOKENS = {"", "nan", "none", "null", "nat", "-", "—", "‌", "0.0.0"}
+
+
+def fa2en(value):
+    if value is None:
         return ""
-    s = str(v)
-    out = []
-    for ch in s:
-        if ch in FA_DIGITS:
-            out.append(str(FA_DIGITS.index(ch)))
-        elif ch in AR_DIGITS:
-            out.append(str(AR_DIGITS.index(ch)))
-        else:
-            out.append(ch)
-    s = "".join(out)
-    s = s.replace("\u0640", "")      # کشیده
-    s = s.replace("\u200c", " ")     # نیم‌فاصله
-    s = s.replace("\u200f", "").replace("\u200e", "")
-    return s.strip()
+    return str(value).translate(FA_DIGITS)
 
 
-def norm_text(v: str) -> str:
-    s = to_latin(v)
-    s = s.replace("ي", "ی").replace("ك", "ک").replace("ۀ", "ه").replace("أ", "ا").replace("إ", "ا")
-    s = re.sub(r"[\u064B-\u065F]", "", s)   # اعراب
-    s = re.sub(r"\s+", " ", s)
-    return s.strip(" -_،,.\t")
-
-
-def name_key(v: str) -> str:
-    """کلید تطبیق نام‌ها: بدون فاصله، بدون علامت، حروف یکسان‌شده"""
-    s = norm_text(v).lower()
-    s = re.sub(r"[^\w\u0600-\u06FF]+", "", s)
+def norm(value):
+    """یکسان‌سازی نام ستون یا نام تجهیز برای تطبیق مطمئن."""
+    if value is None:
+        return ""
+    s = str(value)
+    s = s.replace("\u200c", "").replace("\u200e", "").replace("\u200f", "")
+    s = s.replace("ي", "ی").replace("ك", "ک").replace("ۀ", "ه").replace("ة", "ه")
+    s = s.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا").replace("ٱ", "ا")
+    s = fa2en(s).lower()
+    s = re.sub(r"[\s\.\-_/\\()\[\]{}:،؛,;'\"؟?!*+=|«»ـ]+", "", s)
     return s
 
 
-def fa_num(v) -> str:
-    s = str(v)
-    out = []
-    for ch in s:
-        if ch.isdigit():
-            out.append(FA_DIGITS[int(ch)])
-        else:
-            out.append(ch)
-    return "".join(out)
-
-
-def clean_line(v) -> str:
-    """خط تولید ۶۰ → خط تولید ۶ ، و نام‌های بدون عدد را دست‌نخورده نگه می‌دارد"""
-    s = norm_text(v)
-    if not s:
-        return ""
-    digits = re.findall(r"\d+", s)
-    if digits:
-        n = str(int(digits[-1]))
-        if "خط" in s:
-            return "خط تولید " + n
-        return re.sub(r"\d+", n, s)
-    return s
-
-
-def to_num(v):
-    """مقدار عددی با پذیرش ممیز / و ارقام فارسی؛ مقادیر متنی غیرعددی → NaN"""
-    if v is None:
-        return np.nan
-    s = to_latin(v).strip()
-    if s == "" or s.lower() in ("nan", "none", "null", "-"):
-        return np.nan
-    s2 = s.replace("،", "").replace(" ", "")
-    if re.search(r"[^\d\.\-]", s2):
-        return np.nan
+def is_blank(value):
+    if value is None:
+        return True
     try:
-        return float(s2.replace("..", "."))
+        if pd.isna(value):
+            return True
     except Exception:
-        return np.nan
+        pass
+    return str(value).strip().lower() in EMPTY_TOKENS
 
 
-# ---------- تبدیل دقیق تاریخ شمسی به میلادی (الگوریتم استاندارد) ----------
-def jalali_to_gregorian(jy: int, jm: int, jd: int):
-    jy += 1595
-    days = -355668 + (365 * jy) + ((jy // 33) * 8) + (((jy % 33) + 3) // 4) + jd
-    if jm < 7:
-        days += (jm - 1) * 31
-    else:
-        days += ((jm - 7) * 30) + 186
-
-    gy = 400 * (days // 146097)
-    days %= 146097
-    if days > 36524:
-        days -= 1
-        gy += 100 * (days // 36524)
-        days %= 36524
-        if days >= 365:
-            days += 1
-    gy += 4 * (days // 1461)
-    days %= 1461
-    if days > 365:
-        gy += (days - 1) // 365
-        days = (days - 1) % 365
-    gd = days + 1
-
-    leap = (gy % 4 == 0 and gy % 100 != 0) or (gy % 400 == 0)
-    month_days = [0, 31, 29 if leap else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    gm = 1
-    while gm <= 12 and gd > month_days[gm]:
-        gd -= month_days[gm]
-        gm += 1
-    return gy, gm, gd
-
-
-def parse_jalali(v):
-    """رشته تاریخ شمسی → Timestamp میلادی. اگر تاریخ میلادی بود، مستقیم پذیرفته می‌شود."""
-    if v is None or (isinstance(v, float) and np.isnan(v)):
-        return pd.NaT
-    if isinstance(v, (pd.Timestamp, datetime)):
-        return pd.Timestamp(v)
-
-    s = to_latin(v).strip()
-    s = re.sub(r"[^\d/\-\.]", "", s).replace("-", "/").replace(".", "/")
-    parts = [p for p in s.split("/") if p != ""]
-    if len(parts) != 3:
-        return pd.NaT
-    try:
-        y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
-    except Exception:
-        return pd.NaT
-
-    # تاریخ میلادی چهاررقمی
-    if 1800 <= y <= 2200:
+def to_num(value):
+    """تبدیل محتوا به عدد؛ ناموفق → None."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
         try:
-            return pd.Timestamp(year=y, month=m, day=d)
+            if pd.isna(value):
+                return None
         except Exception:
-            return pd.NaT
-
-    # تاریخ شمسی دو رقمی: 05 → 1405
-    if 0 < y < 100:
-        y += 1400
-
-    if not (1200 <= y <= 1600 and 1 <= m <= 12 and 1 <= d <= 31):
-        return pd.NaT
+            pass
+        return float(value)
+    s = fa2en(value).strip().replace("،", "").replace(",", "").replace(" ", "")
+    s = s.replace("٫", ".")
+    if s.lower() in EMPTY_TOKENS:
+        return None
     try:
-        gy, gm, gd = jalali_to_gregorian(y, m, d)
-        return pd.Timestamp(year=gy, month=gm, day=gd)
+        return float(s)
     except Exception:
-        return pd.NaT
+        m = re.search(r"-?\d+(?:\.\d+)?", s)
+        if m:
+            try:
+                return float(m.group(0))
+            except Exception:
+                return None
+    return None
 
 
-def parse_point(v) -> str:
-    """p1 / P 1 / p-01 → P1"""
-    s = to_latin(v).strip().upper()
-    m = re.match(r"^P\s*[\-_\.]?\s*(\d{1,2})$", s)
+def to_text(value):
+    if is_blank(value):
+        return ""
+    return str(value).strip()
+
+
+def point_of(value):
+    """p1 / P 1 / نقطه ۱ / 1  →  P1"""
+    s = fa2en(value).strip()
+    if s.lower() in EMPTY_TOKENS:
+        return ""
+    m = re.search(r"[pP]\s*[\.\-_]?\s*(\d{1,2})", s)
     if m:
-        return "P" + str(int(m.group(1)))
+        return "P%d" % int(m.group(1))
+    m = re.search(r"(\d{1,2})", s)
+    if m:
+        return "P%d" % int(m.group(1))
     return ""
 
 
-# ==================================================================
-# 3) بارگذاری و آماده‌سازی داده
-# ==================================================================
-def rename_by_rules(cols):
-    """نگاشت نام ستون‌های شیت به نام‌های استاندارد داخلی"""
+def point_label(code):
+    if not code:
+        return ""
+    code = str(code).upper()
+    if code in POINT_LABELS:
+        return POINT_LABELS[code]
+    num = code[1:] if code.startswith("P") else code
+    return "نقطه " + fa2en(num)
+
+
+def point_order(code):
+    m = re.search(r"(\d+)", str(code))
+    return int(m.group(1)) if m else 999
+
+
+def parse_date(value):
+    """تاریخ شمسی → (سال، ماه، روز). فقط ستون تاریخ اصلاح سال می‌شود."""
+    if is_blank(value):
+        return None
+    s = fa2en(value).strip()
+    s = s.split(" ")[0]
+    s = s.replace("٫", "/").replace("-", "/").replace(".", "/")
+    m = re.search(r"(\d{4})\s*/\s*(\d{1,2})\s*/\s*(\d{1,2})", s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    else:
+        m = re.search(r"(\d{1,3})\s*/\s*(\d{1,2})\s*/\s*(\d{1,2})", s)
+        if not m:
+            return None
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    if y < 100:
+        y += 1400
+    elif y < 1000:
+        y += 1000
+    if not (1200 <= y <= 1500):
+        return None
+    if not (1 <= mo <= 12 and 1 <= d <= 31):
+        return None
+    return (y, mo, d)
+
+
+def fmt_date(tpl):
+    if not tpl:
+        return ""
+    return "%04d/%02d/%02d" % (tpl[0], tpl[1], tpl[2])
+
+
+def date_key(tpl):
+    if not tpl:
+        return 0
+    return tpl[0] * 10000 + tpl[1] * 100 + tpl[2]
+
+
+def row_max(h, v, a):
+    vals = [x for x in (h, v, a) if x is not None]
+    return max(vals) if vals else None
+
+
+def status_of(h, v, a):
+    mx = row_max(h, v, a)
+    if mx is None:
+        return "بی‌داده"
+    if mx >= CRIT_LIMIT:
+        return "بحرانی"
+    if mx >= WARN_LIMIT:
+        return "هشدار"
+    return "نرمال"
+
+
+STATUS_ICON = {"بحرانی": "🔴", "هشدار": "🟡", "نرمال": "🟢", "بی‌داده": "⚪"}
+
+
+# ============================================================
+# تطبیق ستون‌ها (ضد KeyError)
+# ============================================================
+def resolve_columns(df, spec):
+    """برای هر نقش، نزدیک‌ترین ستون موجود را پیدا می‌کند."""
+    used = set()
     mapping = {}
-    for c in cols:
-        cs = norm_text(c)
-        low = cs.replace(" ", "")
-        tgt = None
-        if "تاریخ" in cs:
-            tgt = C_DATE
-        elif "خط" in cs:
-            tgt = C_LINE
-        elif "واحد" in cs:
-            tgt = C_UNIT
-        elif "بیرینگ" in cs or "بلبرینگ" in cs:
-            tgt = C_BRG
-        elif "توضیح" in cs:
-            tgt = C_DESC
-        elif "وضعیت" in cs:
-            tgt = C_ST
-        elif "اقدام" in cs:
-            tgt = C_ACT
-        elif "هزینه" in cs:
-            tgt = C_COST
-        elif "اولویت" in cs or "الویت" in cs:
-            tgt = C_PRI
-        elif "دما" in cs or "حرارت" in cs:
-            tgt = C_T
-        elif "عمودی" in cs:
-            tgt = C_V
-        elif "افقی" in cs:
-            tgt = C_H
-        elif "محوری" in cs or "اکسیال" in cs:
-            tgt = C_A
-        elif "محل" in cs and "اندازه" in cs:
-            tgt = "محل اندازه گیری"
-        elif "تصویر" in cs or "عکس" in cs:
-            tgt = "تصویر"
-        elif "نقطه" in cs or "نقاط" in cs:
-            tgt = "نقاط"
-        elif "عنوان" in cs or "تجهیز" in cs or "مکان" in cs or "نام" in cs:
-            tgt = C_EQ
-        if tgt and tgt not in mapping.values():
-            mapping[c] = tgt
+    normed = {}
+    for c in df.columns:
+        nc = norm(c)
+        if nc and nc not in normed:
+            normed[nc] = c
+
+    for role, candidates in spec.items():
+        found = None
+        for cand in candidates:
+            nc = norm(cand)
+            if nc and nc in normed and normed[nc] not in used:
+                found = normed[nc]
+                break
+        if found is None:
+            for cand in candidates:
+                nc = norm(cand)
+                if not nc:
+                    continue
+                for c in df.columns:
+                    if c in used:
+                        continue
+                    if nc in norm(c):
+                        found = c
+                        break
+                if found is not None:
+                    break
+        if found is not None:
+            used.add(found)
+            mapping[role] = found
     return mapping
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def load_raw(vib_url: str, asset_url: str):
-    vib = pd.read_csv(vib_url, dtype=str)
-    vib.columns = [norm_text(c) for c in vib.columns]
-    try:
-        ast = pd.read_csv(asset_url, dtype=str)
-        ast.columns = [norm_text(c) for c in ast.columns]
-    except Exception:
-        ast = pd.DataFrame()
-    return vib, ast
+def col_or_blank(df, mapping, role):
+    if role in mapping:
+        return df[mapping[role]]
+    return pd.Series([""] * len(df), index=df.index)
 
 
-def build_assets(ast: pd.DataFrame) -> pd.DataFrame:
-    """ساخت جدول مرجع: (تجهیز، نقطه) → شماره بیرینگ / نوع تجهیز / دور نامی"""
-    out = pd.DataFrame(columns=[C_EQ, "نقطه", C_BRG, "نوع تجهیز", "دور نامی", C_LINE, C_UNIT])
-    if ast is None or ast.empty:
-        return out
-
-    cols = list(ast.columns)
-
-    def find(*keys):
-        for c in cols:
-            cs = norm_text(c).replace(" ", "")
-            if all(k in cs for k in keys):
-                return c
-        return None
-
-    c_name = find("نام") or find("تجهیز") or find("عنوان")
-    c_pt = find("نقاط") or find("نقطه") or find("راهنما")
-    c_brg = find("بیرینگ")
-    c_type = find("نوع")
-    c_rpm = find("دور")
-    c_line = find("خط")
-    c_unit = find("واحد")
-
-    if not c_name or not c_pt:
-        return out
-
-    df = ast.copy()
-    df["_eq"] = df[c_name].map(norm_text)
-    df["_pt"] = df[c_pt].map(parse_point)
-    df = df[(df["_eq"] != "") & (df["_pt"] != "")]
-
-    def col(c):
-        return df[c].map(norm_text) if c else pd.Series([""] * len(df), index=df.index)
-
-    res = pd.DataFrame({
-        C_EQ: df["_eq"],
-        "نقطه": df["_pt"],
-        C_BRG: col(c_brg),
-        "نوع تجهیز": col(c_type),
-        "دور نامی": col(c_rpm),
-        C_LINE: col(c_line),
-        C_UNIT: col(c_unit),
-    })
-    res = res.drop_duplicates(subset=[C_EQ, "نقطه"], keep="first")
-    return res
-
-
-def build_vibration(vib: pd.DataFrame) -> pd.DataFrame:
-    """ساخت جدول اصلی، یک ردیف برای هر نقطه در هر تاریخ"""
-    empty = pd.DataFrame(columns=[C_DATE, C_JDATE, C_LINE, C_UNIT, C_EQ, C_PT,
-                                  C_BRG, C_H, C_V, C_A, C_T, C_ST,
-                                  C_DESC, C_ACT, C_COST, C_PRI])
-    if vib is None or vib.empty:
-        return empty
-
-    df = vib.copy()
-    df = df.rename(columns=rename_by_rules(df.columns))
-
-    if C_DATE not in df.columns or C_EQ not in df.columns:
-        return empty
-
-    # --- تشخیص ستون نقطه: ستونی که بیشترین تطابق P# را دارد ---
-    candidates = [c for c in [C_PT, "تصویر", "محل اندازه گیری"] if c in df.columns]
-    best_col, best_score = None, 0.0
-    for c in candidates:
-        ser = df[c].dropna().astype(str)
-        if len(ser) == 0:
-            continue
-        score = ser.map(lambda x: 1 if parse_point(x) else 0).mean()
-        if score > best_score:
-            best_col, best_score = c, score
-    if best_col is None or best_score < 0.3:
-        # ستونی برای نقطه پیدا نشد → یک نقطه عمومی
-        df[C_PT] = "P1"
-    else:
-        df[C_PT] = df[best_col].map(parse_point)
-        df.loc[df[C_PT] == "", C_PT] = "P1"
-
-    # --- اعداد ---
-    for c in (C_H, C_V, C_A, C_T):
-        if c in df.columns:
-            df[c] = df[c].map(to_num)
-        else:
-            df[c] = np.nan
-
-    # --- متن‌ها ---
-    df[C_LINE] = df[C_LINE].map(clean_line) if C_LINE in df.columns else ""
-    df[C_UNIT] = df[C_UNIT].map(norm_text) if C_UNIT in df.columns else ""
-    df[C_EQ] = df[C_EQ].map(norm_text)
-    for c in (C_BRG, C_DESC, C_ACT, C_COST, C_PRI, C_ST):
-        df[c] = df[c].map(norm_text) if c in df.columns else ""
-
-    # --- تاریخ ---
-    df[C_DATE] = df[C_DATE].map(parse_jalali)
-    df = df.dropna(subset=[C_DATE])
-    if df.empty:
-        return empty
-
-    df[C_JDATE] = df[C_DATE].map(lambda d: fa_num(d.strftime("%Y/%m/%d")))
-
-    # --- وضعیت: مقدار شیت اگر بود، وگرنه محاسبه از بیشینه سه جهت ---
-    mx = df[[C_H, C_V, C_A]].max(axis=1, skipna=True)
-    calc = pd.Series("نرمال", index=df.index)
-    calc[mx >= TH_WARN] = "هشدار"
-    calc[mx >= TH_CRIT] = "بحرانی"
-    st_norm = df[C_ST].map(lambda s: norm_text(s))
-    st_norm = st_norm.replace({"": np.nan})
-    st_norm = st_norm.replace({"نرمال": "نرمال", "هشدار": "هشدار", "بحرانی": "بحرانی"})
-    df[C_ST] = st_norm.fillna(calc)
-
-    df["_mx"] = mx.round(2)
-
-    cols = [C_DATE, C_JDATE, C_LINE, C_UNIT, C_EQ, C_PT, C_BRG,
-            C_H, C_V, C_A, C_T, C_ST, C_DESC, C_ACT, C_COST, C_PRI, "_mx"]
+def ensure_cols(df, cols):
+    df = df.copy()
     for c in cols:
         if c not in df.columns:
             df[c] = ""
-    return df[cols].reset_index(drop=True)
-
-
-def merge_bearing(df: pd.DataFrame, assets: pd.DataFrame) -> pd.DataFrame:
-    """پر کردن شماره بیرینگ از شیت Assets بر اساس (تجهیز، نقطه)"""
-    if df.empty or assets.empty:
-        return df
-    a = assets.copy()
-    a["_k"] = a[C_EQ].map(name_key) + "|" + a["نقطه"]
-    a = a.drop_duplicates("_k").set_index("_k")
-
-    def lookup(row):
-        k = name_key(row[C_EQ]) + "|" + row[C_PT]
-        if k in a.index:
-            b = a.at[k, C_BRG]
-            if isinstance(b, str) and b.strip():
-                return b.strip()
-        return row[C_BRG] if isinstance(row[C_BRG], str) else ""
-
-    df[C_BRG] = df.apply(lookup, axis=1)
-    df[C_PTNAME] = df[C_PT].map(lambda p: POINT_LABELS.get(p, p))
     return df
 
 
-def ordered_unique(values, priority):
-    vals = [v for v in pd.Series(values).dropna().unique().tolist() if str(v).strip() != ""]
-    pr = [p for p in priority if p in vals]
-    rest = sorted([v for v in vals if v not in pr])
-    return pr + rest
-
-
-# ==================================================================
-# 4) گزارش HTML
-# ==================================================================
-REPORT_CSS = """
-<style>
-  body{font-family:Tahoma,'Segoe UI',sans-serif;background:#f5f7fa;color:#1f2937;
-       direction:rtl;padding:24px;}
-  h1{font-size:20px;color:#123a63;border-bottom:3px solid #123a63;padding-bottom:10px;}
-  .sub{color:#6b7280;font-size:12px;margin-bottom:16px;}
-  .box{background:#fff;border:1px solid #dbe3ec;border-radius:10px;padding:14px 18px;
-       margin-bottom:16px;font-size:13px;line-height:2;}
-  .kpis{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px;}
-  .kpi{flex:1;min-width:120px;background:#fff;border:1px solid #dbe3ec;border-radius:10px;
-       padding:12px;text-align:center;}
-  .kpi .v{font-size:20px;font-weight:bold;color:#123a63;}
-  .kpi .l{font-size:11px;color:#6b7280;margin-top:4px;}
-  table{width:100%;border-collapse:collapse;background:#fff;font-size:12px;
-        border:1px solid #dbe3ec;border-radius:10px;overflow:hidden;}
-  th{background:#123a63;color:#fff;padding:8px 6px;font-weight:normal;}
-  td{padding:7px 6px;border-bottom:1px solid #eef2f7;text-align:center;}
-  tr:nth-child(even) td{background:#fbfcfe;}
-  .crit{background:#fee2e2 !important;color:#991b1b;font-weight:bold;}
-  .warn{background:#fef3c7 !important;color:#92400e;font-weight:bold;}
-  .foot{margin-top:18px;font-size:11px;color:#6b7280;text-align:center;}
-</style>
-"""
-
-
-def esc(v) -> str:
-    return html.escape(str(v if v is not None else ""))
-
-
-def build_report_html(df: pd.DataFrame, meta: dict) -> str:
-    kpi_items = [
-        ("تعداد رکورد", len(df)),
-        ("بحرانی", int((df[C_ST] == "بحرانی").sum()) if not df.empty else 0),
-        ("هشدار", int((df[C_ST] == "هشدار").sum()) if not df.empty else 0),
-        ("تعداد تجهیز", df[C_EQ].nunique() if not df.empty else 0),
-    ]
-    kpis = "".join(
-        f'<div class="kpi"><div class="v">{esc(fa_num(v))}</div><div class="l">{esc(k)}</div></div>'
-        for k, v in kpi_items
-    )
-    info = "".join(f"<div><b>{esc(k)}:</b> {esc(v)}</div>" for k, v in meta.items())
-
-    heads = [C_JDATE, C_LINE, C_UNIT, C_EQ, C_PT, "شرح نقطه", C_BRG, C_H, C_V, C_A, C_T, C_ST]
-    head_html = "".join(f"<th>{esc(h)}</th>" for h in heads)
-
-    rows = []
-    for _, r in df.iterrows():
-        cls = "crit" if r[C_ST] == "بحرانی" else ("warn" if r[C_ST] == "هشدار" else "")
-        cells = []
-        for h in heads:
-            val = r.get(h, "")
-            if isinstance(val, float):
-                val = "—" if np.isnan(val) else f"{val:.2f}"
-            if h == C_PT:
-                val = fa_num(str(val))
-            cells.append(esc(val))
-        rows.append(f'<tr class="{cls}">' + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
-
-    return (
-        "<!DOCTYPE html><html lang='fa' dir='rtl'><head><meta charset='utf-8'>"
-        f"<title>گزارش پایش ارتعاش</title>{REPORT_CSS}</head><body>"
-        f"<h1>گزارش پایش وضعیت ارتعاش - سیمان تهران</h1>"
-        f"<div class='sub'>تاریخ تهیه: {esc(fa_num(datetime.now().strftime('%Y/%m/%d - %H:%M')))}</div>"
-        f"<div class='box'>{info}</div>"
-        f"<div class='kpis'>{kpis}</div>"
-        f"<table><thead><tr>{head_html}</tr></thead><tbody>{''.join(rows)}</tbody></table>"
-        "<div class='foot'>این گزارش به‌صورت خودکار توسط سامانه پایش وضعیت تولید شده است.</div>"
-        "</body></html>"
-    )
-
-
-# ==================================================================
-# 5) رابط کاربری
-# ==================================================================
-st.set_page_config(page_title="پایش وضعیت - سیمان تهران", page_icon="📊", layout="wide")
-
-
-def render_logo(path, caption):
-    if os.path.exists(path):
-        st.image(path, use_container_width=True)
-    else:
-        st.markdown(
-            f"<div style='border:1px dashed #c9d6e4;border-radius:10px;padding:14px;"
-            f"text-align:center;color:#7b8a99;font-size:12px'>{esc(caption)}</div>",
-            unsafe_allow_html=True,
-        )
-
-
-c1, c2, c3 = st.columns([1, 4, 1])
-with c1:
-    render_logo(LOGO_MINE, "لوگوی شرکت")
-with c2:
-    st.markdown(
-        f"<h2 style='text-align:center;margin-bottom:0'>{esc(APP_TITLE)}</h2>"
-        f"<p style='text-align:center;color:#7b8a99;font-size:13px'>{esc(APP_SUB)}</p>",
-        unsafe_allow_html=True,
-    )
-with c3:
-    render_logo(LOGO_CLIENT, "لوگوی کارخانه")
-
-# ---------------- ورود ----------------
-if "user" not in st.session_state:
-    st.session_state.user = None
-
-if st.session_state.user is None:
-    st.divider()
-    st.markdown("### 🔐 ورود به سامانه")
-    with st.form("login"):
-        email = st.text_input("ایمیل سازمانی", placeholder="name@example.com")
-        pwd = st.text_input("رمز عبور", type="password")
-        ok = st.form_submit_button("ورود به داشبورد", use_container_width=True)
-    if ok:
-        e = (email or "").strip().lower()
-        if e in USER_DB and USER_DB[e]["password"] == pwd:
-            st.session_state.user = e
-            st.rerun()
-        elif e and e not in USER_DB:
-            st.error("این ایمیل در سامانه ثبت نشده است.")
+def _dedupe(cols):
+    seen = {}
+    out = []
+    for c in cols:
+        name = str(c).strip()
+        if not name:
+            name = "ستون"
+        if name in seen:
+            seen[name] += 1
+            name = "%s_%d" % (name, seen[name])
         else:
-            st.error("رمز عبور نادرست است.")
-    st.caption("رمز پیش‌فرض کاربران: siman123")
-    st.stop()
+            seen[name] = 0
+        out.append(name)
+    return out
 
-user_email = st.session_state.user
-uinfo = USER_DB[user_email]
-is_owner = user_email == OWNER_EMAIL
-can_send = is_owner or any(k in uinfo["role"] for k in SEND_ROLES)
 
-b1, b2, b3 = st.columns([4, 3, 1])
-with b1:
-    st.markdown(f"👤 **{esc(uinfo['name'])}** — `{esc(user_email)}` | نقش: {esc(uinfo['role'])}")
-with b2:
-    st.caption("📨 ارسال اعلان: " + ("✅" if can_send else "⛔") +
-               " | ✏️ تغییر داده: " + ("✅" if is_owner else "⛔"))
-with b3:
-    if st.button("خروج", use_container_width=True):
-        st.session_state.user = None
-        st.rerun()
+# ============================================================
+# خواندن شیت
+# ============================================================
+@st.cache_data(ttl=300, show_spinner="در حال خواندن شیت...")
+def load_sheet(sheet_name):
+    errors = []
 
-st.divider()
-
-# ---------------- بارگذاری ----------------
-with st.spinner("در حال دریافت داده از گوگل شیت ..."):
+    # ۱) سرویس اکانت
     try:
-        raw_vib, raw_ast = load_raw(VIB_CSV_URL, ASSET_CSV_URL)
-        load_err = ""
-    except Exception as e:
-        raw_vib, raw_ast = pd.DataFrame(), pd.DataFrame()
-        load_err = str(e)
+        import gspread
+        from google.oauth2.service_account import Credentials
 
-if load_err:
-    st.error("اتصال به گوگل شیت برقرار نشد. پیام فنی: " + load_err)
-    st.info("بررسی کن: ۱) شیت برای 'انتشار به وب' تنظیم شده باشد. ۲) شناسه gid شیت Assets درست باشد.")
+        creds_info = None
+        try:
+            creds_info = dict(st.secrets["gcp_service_account"])
+        except Exception:
+            creds_info = None
+
+        if creds_info and SHEET_ID:
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets.readonly",
+                "https://www.googleapis.com/auth/drive.readonly",
+            ]
+            creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
+            gc = gspread.authorize(creds)
+            sh = gc.open_by_key(SHEET_ID)
+            ws = sh.worksheet(sheet_name)
+            values = ws.get_all_values()
+            if len(values) < 2:
+                raise ValueError("شیت خالی است یا فقط سرستون دارد")
+            header = _dedupe(values[0])
+            rows = []
+            for r in values[1:]:
+                r = list(r) + [""] * (len(header) - len(r))
+                rows.append(r[: len(header)])
+            return pd.DataFrame(rows, columns=header), ""
+        raise ValueError("شناسه شیت یا اطلاعات سرویس اکانت تنظیم نشده")
+    except Exception as exc:
+        errors.append("gspread: %s" % exc)
+
+    # ۲) خروجی CSV عمومی
+    try:
+        url = (
+            "https://docs.google.com/spreadsheets/d/%s/gviz/tq?tqx=out:csv&sheet=%s"
+            % (SHEET_ID, requests.utils.quote(sheet_name))
+        )
+        resp = requests.get(url, timeout=45)
+        resp.raise_for_status()
+        resp.encoding = "utf-8"
+        df = pd.read_csv(io.StringIO(resp.text), dtype=str)
+        df.columns = _dedupe(list(df.columns))
+        return df, ""
+    except Exception as exc:
+        errors.append("csv: %s" % exc)
+
+    return pd.DataFrame(), " | ".join(errors)
+
+
+# ============================================================
+# ساخت داده تمیز
+# ============================================================
+def build_assets(df):
+    """دیکشنری (نام تجهیز یکسان‌شده، کد نقطه) → اطلاعات بیرینگ"""
+    if df is None or df.empty:
+        return {}
+    m = resolve_columns(df, ASSET_COLUMNS)
+    if "equip" not in m or "point" not in m:
+        return {}
+
+    equip_s = col_or_blank(df, m, "equip")
+    point_s = col_or_blank(df, m, "point")
+    bearing_s = col_or_blank(df, m, "bearing")
+    bush_s = col_or_blank(df, m, "bush")
+    rpm_s = col_or_blank(df, m, "rpm")
+
+    out = {}
+    for equip, pt, brg, bush, rpm in zip(equip_s, point_s, bearing_s, bush_s, rpm_s):
+        code = point_of(pt)
+        ekey = norm(equip)
+        if not ekey or not code:
+            continue
+        out[(ekey, code)] = {
+            "equip": to_text(equip),
+            "bearing": to_text(brg),
+            "bush": to_text(bush),
+            "rpm": to_text(rpm),
+        }
+    return out
+
+
+def lookup_asset(assets, equip, code):
+    ekey = norm(equip)
+    if not ekey or not code:
+        return None
+    hit = assets.get((ekey, code))
+    if hit:
+        return hit
+    target = str(equip).strip()
+    for (akey, acode), val in assets.items():
+        if acode != code:
+            continue
+        if akey and (ekey in akey or akey in ekey):
+            return val
+        if target and (target in val["equip"] or val["equip"] in target):
+            return val
+    return None
+
+
+def build_vib(df, assets):
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    m = resolve_columns(df, COLUMNS)
+
+    out = pd.DataFrame(index=df.index)
+
+    # --- تاریخ ---
+    raw_date = col_or_blank(df, m, "date")
+    out["تاریخ"] = [fmt_date(parse_date(x)) for x in raw_date]
+    out["_date_key"] = [date_key(parse_date(x)) for x in raw_date]
+
+    # --- خط، واحد، تجهیز ---
+    out["خط تولید"] = [clean_line(x) for x in col_or_blank(df, m, "line")]
+    out["واحد"] = [to_text(x) for x in col_or_blank(df, m, "unit")]
+    out["عنوان تجهیز"] = [to_text(x) for x in col_or_blank(df, m, "equip")]
+
+    # --- نقطه: اول «تصویر»، بعد «محل اندازه گیری» ---
+    raw_point = col_or_blank(df, m, "point")
+    codes = [point_of(x) for x in raw_point]
+    if all(c == "" for c in codes):
+        for fallback in ["محل اندازه گیری", "نقطه", "شماره نقطه", "مکان"]:
+            cand = resolve_columns(df, {"p": [fallback]})
+            if "p" in cand:
+                raw_point = df[cand["p"]]
+                codes = [point_of(x) for x in raw_point]
+                if any(c != "" for c in codes):
+                    break
+    out["نقطه"] = codes
+    out["شرح نقطه"] = [point_label(c) for c in codes]
+
+    # --- سه جهت اندازه‌گیری ---
+    h = [to_num(x) for x in col_or_blank(df, m, "h")]
+    v = [to_num(x) for x in col_or_blank(df, m, "v")]
+    a = [to_num(x) for x in col_or_blank(df, m, "a")]
+    out["افقی"] = h
+    out["عمودی"] = v
+    out["محوری"] = a
+    out["حداکثر"] = [row_max(x, y, z) for x, y, z in zip(h, v, a)]
+
+    # --- دما ---
+    out["دما"] = [to_num(x) for x in col_or_blank(df, m, "temp")]
+
+    # --- ستون‌های مدیریتی ---
+    out["توضیحات"] = [to_text(x) for x in col_or_blank(df, m, "desc")]
+    out["اقدام اصلاحی"] = [to_text(x) for x in col_or_blank(df, m, "action")]
+    out["هزینه"] = [to_text(x) for x in col_or_blank(df, m, "cost")]
+    out["اولویت"] = [to_text(x) for x in col_or_blank(df, m, "priority")]
+    out["وضعیت ثبت‌شده"] = [to_text(x) for x in col_or_blank(df, m, "status")]
+    vib_bearing = [to_text(x) for x in col_or_blank(df, m, "bearing")]
+
+    # --- شماره بیرینگ: اول شیت ارتعاشات، بعد Assets ---
+    bearings = []
+    for i, idx in enumerate(out.index):
+        own = vib_bearing[i] if i < len(vib_bearing) else ""
+        if own:
+            bearings.append(own)
+            continue
+        info = lookup_asset(assets, out.at[idx, "عنوان تجهیز"], out.at[idx, "نقطه"])
+        bearings.append(info["bearing"] if info else "")
+    out["شماره بیرینگ"] = bearings
+
+    # --- وضعیت ---
+    statuses = []
+    for x, y, z, given in zip(h, v, a, out["وضعیت ثبت‌شده"]):
+        s = status_of(x, y, z)
+        icon = STATUS_ICON.get(s, "⚪")
+        if given and any(k in given for k in ("بحرانی", "هشدار", "نرمال")):
+            statuses.append(icon + " " + given)
+        elif given:
+            statuses.append(icon + " " + given)
+        else:
+            statuses.append(icon + " " + s)
+    out["وضعیت"] = statuses
+
+    # --- حذف ردیف‌های بی‌تاریخ ---
+    out = out[out["_date_key"] > 0]
+    out = out[out["تاریخ"].astype(str).str.strip() != ""]
+    if out.empty:
+        return pd.DataFrame()
+
+    out["_ord"] = [point_order(c) for c in out["نقطه"]]
+    out = out.sort_values(["_date_key", "_ord"], ascending=[False, True])
+    return out
+
+
+def clean_line(value):
+    s = to_text(value)
+    if not s:
+        return ""
+    s = fa2en(s)
+    m = re.fullmatch(r"(\d+)\.0*", s)
+    if m:
+        return m.group(1)
+    if re.fullmatch(r"\d+", s):
+        return str(int(s))
+    return s
+
+
+# ============================================================
+# نمایش و گزارش
+# ============================================================
+def color_status(val):
+    s = str(val)
+    if "بحرانی" in s:
+        return "color:#c62828;font-weight:700"
+    if "هشدار" in s:
+        return "color:#ef6c00;font-weight:700"
+    if "نرمال" in s:
+        return "color:#2e7d32;font-weight:700"
+    return "color:#757575"
+
+
+def style_table(df):
+    try:
+        sty = df.style.format({c: "{:.1f}" for c in NUM_COLS if c in df.columns}, na_rep="—")
+        try:
+            sty = sty.map(color_status, subset=["وضعیت"])
+        except Exception:
+            sty = sty.applymap(color_status, subset=["وضعیت"])
+        return sty
+    except Exception:
+        return df
+
+
+REPORT_TEMPLATE = """<!DOCTYPE html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<title>گزارش پایش ارتعاشات</title>
+<style>
+ body{font-family:Tahoma,Vazirmatn,sans-serif;background:#fff;color:#222;padding:24px}
+ h1{font-size:20px;margin:0 0 6px}
+ .meta{font-size:12px;color:#555;margin-bottom:16px}
+ table{border-collapse:collapse;width:100%;font-size:12px}
+ th{background:#263238;color:#fff;padding:7px 5px;border:1px solid #37474f}
+ td{padding:6px 5px;border:1px solid #cfd8dc;text-align:center}
+ tr.crit td{background:#ffebee}
+ tr.warn td{background:#fff8e1}
+ tr.ok td{background:#f1f8e9}
+ .legend{margin-top:14px;font-size:12px;color:#455a64}
+</style></head><body>
+<h1>گزارش پایش وضعیت ارتعاشات</h1>
+<div class="meta">تجهیز: __EQUIP__ &nbsp;|&nbsp; بازه: __DATES__ &nbsp;|&nbsp; تاریخ گزارش: __NOW__</div>
+<table><thead><tr>__HEAD__</tr></thead><tbody>__ROWS__</tbody></table>
+<div class="legend">حد هشدار: ۴/۵ mm/s &nbsp;|&nbsp; حد بحرانی: ۷ mm/s</div>
+</body></html>"""
+
+
+def build_report_html(show, equip_title, caption_dates):
+    head_cells = "".join("<th>%s</th>" % c for c in REPORT_COLS)
+    rows = []
+    for _, r in show.iterrows():
+        cls = "ok"
+        stt = str(r.get("وضعیت", ""))
+        if "بحرانی" in stt:
+            cls = "crit"
+        elif "هشدار" in stt:
+            cls = "warn"
+        cells = []
+        for c in REPORT_COLS:
+            val = r.get(c, "")
+            if val is None or (isinstance(val, float) and pd.isna(val)):
+                val = "—"
+            elif isinstance(val, float):
+                val = "%.1f" % val
+            cells.append("<td>%s</td>" % str(val))
+        rows.append("<tr class='%s'>%s</tr>" % (cls, "".join(cells)))
+
+    html = REPORT_TEMPLATE
+    html = html.replace("__EQUIP__", str(equip_title))
+    html = html.replace("__DATES__", str(caption_dates))
+    html = html.replace("__NOW__", dt.datetime.now().strftime("%Y-%m-%d %H:%M"))
+    html = html.replace("__HEAD__", head_cells)
+    html = html.replace("__ROWS__", "".join(rows))
+    return html
+
+
+# ============================================================
+# بارگذاری داده
+# ============================================================
+if not SHEET_ID:
+    st.title("📈 سامانه پایش وضعیت ارتعاشات")
+    st.error("شناسه شیت (SHEET_ID) تنظیم نشده است.")
+    st.info(
+        "در بخش Secrets برنامه، مقدار SHEET_ID را برابر شناسه فایل گوگل‌شیت قرار بده.\n\n"
+        "شناسه، بخشی از آدرس بین /d/ تا /edit است."
+    )
     st.stop()
 
-assets = build_assets(raw_ast)
-df_all = build_vibration(raw_vib)
-df_all = merge_bearing(df_all, assets)
+vib_raw, vib_err = load_sheet(SHEET_VIB)
+asr_raw, asr_err = load_sheet(SHEET_ASSETS)
 
-if df_all.empty:
-    st.error("داده‌ای از شیت ارتعاشات خوانده نشد. ستون‌های مورد نیاز: تاریخ، خط تولید، واحد، عنوان تجهیز، "
-             "محل اندازه گیری (یا ستون نقطه)، عمودی، افقی، محوری.")
+assets = build_assets(asr_raw)
+vib = build_vib(vib_raw, assets)
+
+# ============================================================
+# سربرگ
+# ============================================================
+c1, c2, c3 = st.columns([1, 3, 1])
+with c1:
+    if os.path.exists("my_logo.png"):
+        st.image("my_logo.png", width=90)
+with c3:
+    if os.path.exists("client_logo.png"):
+        st.image("client_logo.png", width=90)
+
+st.title("📈 سامانه پایش وضعیت ارتعاشات")
+st.caption("نمایش نقطه‌به‌نقطه، اتصال شماره بیرینگ از شیت Assets و گزارش قابل چاپ")
+
+if vib.empty:
+    st.error("داده‌ای برای نمایش پیدا نشد.")
+    st.markdown("**پیام خواندن شیت ارتعاشات:**")
+    st.code(vib_err or "بدون پیام", language="text")
+    if not vib_raw.empty:
+        st.markdown("**سرستون‌های شناسایی‌شده در شیت:**")
+        st.write(list(vib_raw.columns))
+        st.markdown("**چند ردیف اول:**")
+        st.dataframe(vib_raw.head(5))
+    st.info(
+        "۱) SHEET_ID را تنظیم کن.\n"
+        "۲) نام تب‌ها باید «ارتعاشات» و «Assets» باشد.\n"
+        "۳) دسترسی شیت را روی «هر کسی با لینک» بگذار."
+    )
     st.stop()
 
-with st.sidebar:
-    st.markdown("### ℹ️ وضعیت داده")
-    st.write("رکورد خام شیت:", len(raw_vib))
-    st.write("رکورد معتبر:", len(df_all))
-    st.write("تجهیز:", df_all[C_EQ].nunique(), "| نقطه:", df_all[C_PT].nunique())
-    st.write("بازه:", df_all[C_JDATE].min(), "تا", df_all[C_JDATE].max())
-    st.caption("منبع: گوگل شیت (کش ۵ دقیقه‌ای)")
-    if st.button("🔄 بروزرسانی داده", use_container_width=True):
-        load_raw.clear()
-        st.rerun()
+if asr_raw.empty:
+    st.warning("شیت Assets خوانده نشد؛ شماره بیرینگ فقط از شیت ارتعاشات برداشته می‌شود.")
 
-# ---------------- فیلترها ----------------
-st.markdown("#### 🔎 فیلترها (خط ➔ واحد ➔ تجهیز ➔ تاریخ)")
+# ============================================================
+# فیلترها
+# ============================================================
+st.sidebar.header("🔎 فیلترها")
 
-f1, f2, f3 = st.columns([2, 2, 3])
+equip_options = sorted({e for e in vib["عنوان تجهیز"].tolist() if str(e).strip()})
+if not equip_options:
+    st.error("هیچ تجهیزی در شیت ارتعاشات شناسایی نشد.")
+    st.info("ستون «عنوان تجهیز» را در شیت بررسی کن. سرستون‌های فعلی: %s" % list(vib_raw.columns))
+    st.stop()
 
-lines = ordered_unique(df_all[C_LINE], LINE_PRIORITY)
-with f1:
-    sel_line = st.selectbox("۱) خط تولید", ["همه خطوط"] + lines)
+equip = st.sidebar.selectbox("تجهیز", equip_options, index=0)
+equip_df = vib[vib["عنوان تجهیز"] == equip].copy()
 
-src_line = df_all if sel_line == "همه خطوط" else df_all[df_all[C_LINE] == sel_line]
-units = ordered_unique(src_line[C_UNIT], UNIT_PRIORITY)
-with f2:
-    sel_unit = st.selectbox("۲) واحد", ["همه واحدها"] + units, key="u_" + sel_line)
+date_list = (
+    equip_df[["تاریخ", "_date_key"]]
+    .drop_duplicates()
+    .sort_values("_date_key", ascending=False)["تاریخ"]
+    .tolist()
+)
+date_list = [d for d in date_list if str(d).strip()]
 
-src_unit = src_line if sel_unit == "همه واحدها" else src_line[src_line[C_UNIT] == sel_unit]
-equips = ordered_unique(src_unit[C_EQ], [])
-with f3:
-    if len(equips) == 0:
-        sel_eq = []
-        st.selectbox("۳) عنوان تجهیز", ["-"], disabled=True)
-    elif len(equips) == 1:
-        sel_eq = [st.selectbox("۳) عنوان تجهیز", equips, key="e1_" + sel_line + sel_unit)]
+mode = st.sidebar.radio(
+    "بازه تاریخ",
+    ["همه تاریخ‌ها", "بازه تاریخی", "تاریخ‌های خاص"],
+    index=0,
+)
+
+selected_dates = date_list
+caption_dates = "همه تاریخ‌های موجود"
+start_txt = date_list[-1] if date_list else "-"
+end_txt = date_list[0] if date_list else "-"
+
+if mode == "بازه تاریخی" and date_list:
+    ordered = sorted(date_list, key=lambda x: date_key(parse_date(x)))
+    if len(ordered) == 1:
+        start = end = ordered[0]
     else:
-        sel_eq = st.multiselect("۳) عنوان تجهیز", equips,
-                                default=[equips[0]] if len(equips) < 12 else equips[:1],
-                                key="em_" + sel_line + sel_unit)
+        cc1, cc2 = st.sidebar.columns(2)
+        start = cc1.selectbox("از تاریخ", ordered, index=0)
+        end = cc2.selectbox("تا تاریخ", ordered, index=len(ordered) - 1)
+    k1, k2 = date_key(parse_date(start)), date_key(parse_date(end))
+    if k1 > k2:
+        k1, k2 = k2, k1
+        start, end = end, start
+    selected_dates = [d for d in ordered if k1 <= date_key(parse_date(d)) <= k2]
+    caption_dates = "از %s تا %s" % (start, end)
+    start_txt, end_txt = start, end
 
-# اعمال تا اینجا
-df = df_all.copy()
-if sel_line != "همه خطوط":
-    df = df[df[C_LINE] == sel_line]
-if sel_unit != "همه واحدها":
-    df = df[df[C_UNIT] == sel_unit]
-if sel_eq:
-    df = df[df[C_EQ].isin(sel_eq)]
+elif mode == "تاریخ‌های خاص":
+    picked = st.sidebar.multiselect(
+        "تاریخ‌ها را انتخاب کن", date_list, default=date_list[:1]
+    )
+    selected_dates = picked
+    caption_dates = "، ".join(picked) if picked else "بدون انتخاب"
+    if picked:
+        start_txt = min(picked, key=lambda x: date_key(parse_date(x)))
+        end_txt = max(picked, key=lambda x: date_key(parse_date(x)))
 
-# ---------------- فیلتر تاریخ (بعد از تجهیز) ----------------
-f4, f5, f6 = st.columns([2, 2, 2])
-with f4:
-    mode = st.radio("۴) فیلتر تاریخ", ["همه تاریخ‌ها", "بازه تاریخی", "تاریخ‌های خاص"],
-                    horizontal=True, key="dmode")
+if not selected_dates:
+    st.warning("هیچ تاریخی انتخاب نشده است.")
+    st.stop()
 
-dates_avail = sorted(df[C_JDATE].dropna().unique().tolist())
-sel_d1 = sel_d2 = None
-sel_dates = []
+show = equip_df[equip_df["تاریخ"].isin(selected_dates)].copy()
+show = ensure_cols(show, VIEW_COLS)
+show = show.sort_values(["_date_key", "_ord"], ascending=[False, True])
 
-with f5:
-    if mode == "بازه تاریخی":
-        if len(dates_avail) >= 1:
-            sel_d1 = st.selectbox("از تاریخ", dates_avail, index=0, key="d1")
-            sel_d2 = st.selectbox("تا تاریخ", dates_avail, index=len(dates_avail) - 1, key="d2")
-        else:
-            st.info("تاریخی برای این انتخاب موجود نیست.")
-    elif mode == "تاریخ‌های خاص":
-        if dates_avail:
-            sel_dates = st.multiselect("تاریخ‌ها", dates_avail, key="ds")
-        else:
-            st.info("تاریخی برای این انتخاب موجود نیست.")
+with st.sidebar.expander("ℹ️ وضعیت خوانش داده"):
+    st.write("ردیف خام ارتعاشات:", len(vib_raw))
+    st.write("ردیف معتبر:", len(vib))
+    st.write("تعداد تجهیز:", len(equip_options))
+    st.write("ردیف شیت Assets:", len(asr_raw))
+    st.write("تاریخ‌های این تجهیز:", len(date_list))
+
+mx_all = show["حداکثر"].max() if not show.empty else None
+
+mcol1, mcol2, mcol3, mcol4 = st.columns(4)
+mcol1.metric("حداکثر ارتعاش در انتخاب", ("%.2f mm/s" % mx_all) if mx_all is not None else "—")
+mcol2.metric("تعداد ردیف", len(show))
+mcol3.metric("تعداد نقاط", show["نقطه"].nunique())
+crit_count = int(show["وضعیت"].astype(str).str.contains("بحرانی").sum())
+mcol4.metric("ردیف بحرانی", crit_count)
+
+# ============================================================
+# تب‌ها
+# ============================================================
+tab_table, tab_chart, tab_alert, tab_users = st.tabs(
+    ["📋 جدول داده‌ها", "📈 نمودارها", "📧 ارسال اعلان", "👥 کاربران"]
+)
+
+# ---------------- جدول ----------------
+with tab_table:
+    st.subheader("داده‌های ارتعاش — %s" % equip)
+    st.caption("بازه: %s" % caption_dates)
+
+    only_crit = st.checkbox("فقط ردیف‌های بحرانی و هشدار", value=False)
+    tbl = show.copy()
+    if only_crit:
+        tbl = tbl[tbl["وضعیت"].astype(str).str.contains("بحرانی|هشدار")]
+
+    if tbl.empty:
+        st.info("ردیفی برای نمایش نیست.")
     else:
-        st.caption("تمام تاریخ‌های موجود این تجهیز نمایش داده می‌شود.")
+        st.dataframe(style_table(tbl[VIEW_COLS]), use_container_width=True, hide_index=True)
 
-if mode == "بازه تاریخی" and sel_d1 and sel_d2:
-    if sel_d1 > sel_d2:
-        sel_d1, sel_d2 = sel_d2, sel_d1
-    df = df[(df[C_JDATE] >= sel_d1) & (df[C_JDATE] <= sel_d2)]
-elif mode == "تاریخ‌های خاص" and sel_dates:
-    df = df[df[C_JDATE].isin(sel_dates)]
+    dc1, dc2 = st.columns(2)
+    with dc1:
+        csv = tbl[VIEW_COLS].to_csv(index=False).encode("utf-8-sig")
+        st.download_button("⬇️ دانلود CSV", data=csv, file_name="vibration_%s.csv" % equip,
+                           mime="text/csv", use_container_width=True)
+    with dc2:
+        html_report = build_report_html(tbl, equip, caption_dates)
+        st.download_button("🖨️ دانلود گزارش HTML (قابل چاپ)",
+                           data=html_report.encode("utf-8"),
+                           file_name="report_%s.html" % equip,
+                           mime="text/html", use_container_width=True)
 
-# مسیر فیلتر
-path = [sel_line]
-if sel_unit != "همه واحدها":
-    path.append(sel_unit)
-if sel_eq:
-    path.append("، ".join(sel_eq[:3]) + (" و ..." if len(sel_eq) > 3 else ""))
-if mode == "بازه تاریخی" and sel_d1:
-    path.append(f"{sel_d1} تا {sel_d2}")
-elif mode == "تاریخ‌های خاص" and sel_dates:
-    path.append("، ".join(sel_dates[:4]))
-with f6:
-    st.caption("🧭 مسیر: " + " ➔ ".join(path))
-    st.caption(f"تعداد رکورد: {fa_num(len(df))}")
-
-st.divider()
-
-# ---------------- KPI ----------------
-k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("کل رکورد", fa_num(len(df)))
-k2.metric("بحرانی", fa_num(int((df[C_ST] == "بحرانی").sum())))
-k3.metric("هشدار", fa_num(int((df[C_ST] == "هشدار").sum())))
-k4.metric("تجهیز", fa_num(df[C_EQ].nunique()))
-k5.metric("میانگین بیشینه", f"{df['_mx'].mean():.2f} mm/s" if not df.empty else "—")
-
-# ---------------- تب‌ها ----------------
-tab1, tab2, tab3, tab4 = st.tabs(["📋 جدول داده‌ها", "📈 نمودارها", "📨 ارسال اعلان", "👥 کاربران"])
-
-VIEW_COLS = [C_JDATE, C_LINE, C_UNIT, C_EQ, C_PT, C_PTNAME, C_BRG,
-             C_H, C_V, C_A, C_T, C_ST, C_DESC, C_ACT, C_PRI]
-
-with tab1:
-    if df.empty:
-        st.info("با این فیلترها رکوردی یافت نشد.")
-    else:
-        show = df.copy()
-        show["وضعیت"] = show[C_ST].map(
-            lambda s: {"بحرانی": "🔴 بحرانی", "هشدار": "🟡 هشدار", "نرمال": "🟢 نرمال"}.get(s, s))
-        show = show.rename(columns={"وضعیت": "وضعیت"})
-        st.dataframe(show[VIEW_COLS], use_container_width=True, height=520,
-                     column_config={
-                         C_JDATE: st.column_config.TextColumn("تاریخ شمسی", width="small"),
-                         C_PT: st.column_config.TextColumn("نقطه", width="small"),
-                     })
-
-        d1, d2 = st.columns(2)
-        with d1:
-            st.download_button(
-                "⬇️ دانلود CSV",
-                data=df[VIEW_COLS].to_csv(index=False).encode("utf-8-sig"),
-                file_name="vibration_data.csv", mime="text/csv",
-                use_container_width=True,
-            )
-        with d2:
-            meta = {
-                "مسیر فیلتر": " ➔ ".join(path),
-                "حالت تاریخ": mode,
-                "بازه نمایش": f"{df[C_JDATE].min()} تا {df[C_JDATE].max()}",
-                "تهیه‌کننده": f"{uinfo['name']} - {uinfo['role']}",
-                "آستانه‌ها": f"هشدار {TH_WARN} | بحرانی {TH_CRIT} (mm/s)",
-            }
-            st.download_button(
-                "🧾 گزارش HTML (قابل چاپ به PDF)",
-                data=build_report_html(df, meta).encode("utf-8"),
-                file_name=f"vibration_report_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
-                mime="text/html", use_container_width=True,
-            )
-        st.caption("برای PDF: فایل را در مرورگر باز کن و Ctrl+P → Save as PDF.")
-
-with tab2:
-    if df.empty:
+# ---------------- نمودار ----------------
+with tab_chart:
+    st.subheader("روند ارتعاش")
+    if show.empty:
         st.info("داده‌ای برای نمودار نیست.")
     else:
-        ch1, ch2 = st.columns(2)
+        g = show.copy()
+        g["_label_date"] = g["تاریخ"]
+        trend = g.groupby("_label_date")[["افقی", "عمودی", "محوری"]].max().sort_index()
+        st.markdown("**بیشترین مقدار هر جهت در هر تاریخ**")
+        st.line_chart(trend)
 
-        with ch1:
-            fig = go.Figure()
-            for col, name, color in ((C_H, "افقی", "#2563eb"), (C_V, "عمودی", "#16a34a"), (C_A, "محوری", "#dc2626")):
-                tmp = df.dropna(subset=[col])
-                if not tmp.empty:
-                    fig.add_trace(go.Scatter(x=tmp[C_JDATE], y=tmp[col], mode="markers+lines",
-                                             name=name, marker=dict(size=7, color=color), line=dict(color=color)))
-            fig.add_hline(y=TH_WARN, line_dash="dash", line_color="#f59e0b",
-                          annotation_text="هشدار ۴/۵")
-            fig.add_hline(y=TH_CRIT, line_dash="dash", line_color="#dc2626",
-                          annotation_text="بحرانی ۷")
-            fig.update_layout(title="روند ارتعاش (mm/s)", height=400,
-                              yaxis_title="mm/s", xaxis_title="تاریخ")
-            st.plotly_chart(fig, use_container_width=True)
+        st.markdown("**میانگین ارتعاش هر نقطه (حداکثر سه جهت)**")
+        by_point = (
+            g.groupby("نقطه")["حداکثر"].max().dropna().sort_values(ascending=False)
+        )
+        if not by_point.empty:
+            by_point.index = [c + " - " + point_label(c) for c in by_point.index]
+            st.bar_chart(by_point)
 
-        with ch2:
-            worst = (df.dropna(subset=["_mx"])
-                       .sort_values("_mx", ascending=False)
-                       .drop_duplicates(subset=[C_EQ, C_PT])
-                       .head(12))
-            if not worst.empty:
-                worst = worst.assign(label=worst[C_EQ] + " - " + worst[C_PT])
-                fig2 = px.bar(worst.sort_values("_mx"), x="_mx", y="label", orientation="h",
-                              color=C_ST,
-                              color_discrete_map={"بحرانی": "#dc2626", "هشدار": "#f59e0b", "نرمال": "#16a34a"},
-                              title="۱۲ نقطه با بیشترین ارتعاش")
-                fig2.update_layout(height=400, yaxis_title="", xaxis_title="mm/s", showlegend=True)
-                st.plotly_chart(fig2, use_container_width=True)
+        st.markdown("**سهم وضعیت‌ها**")
+        stt = g["وضعیت"].astype(str).str.replace("🔴 ", "").str.replace("🟡 ", "")
+        stt = stt.str.replace("🟢 ", "").str.replace("⚪ ", "")
+        st.bar_chart(stt.value_counts())
 
-        ch3, ch4 = st.columns(2)
-        with ch3:
-            cnt = df[C_ST].value_counts().reset_index()
-            cnt.columns = ["وضعیت", "تعداد"]
-            fig3 = px.pie(cnt, names="وضعیت", values="تعداد", hole=0.5,
-                          title="سهم وضعیت‌ها",
-                          color="وضعیت",
-                          color_discrete_map={"بحرانی": "#dc2626", "هشدار": "#f59e0b", "نرمال": "#16a34a"})
-            fig3.update_layout(height=380)
-            st.plotly_chart(fig3, use_container_width=True)
+        if g["دما"].notna().any():
+            st.markdown("**روند دما**")
+            temp = g.groupby("_label_date")["دما"].max().sort_index()
+            st.line_chart(temp)
+        else:
+            st.caption("ستون دما خالی است، بنابراین نمودار دما نمایش داده نمی‌شود.")
 
-        with ch4:
-            tmp = df.dropna(subset=[C_T])
-            if not tmp.empty:
-                fig4 = px.line(tmp, x=C_JDATE, y=C_T, color=C_PT if tmp[C_PT].nunique() <= 6 else None,
-                               markers=True, title="روند دما (°C)")
-                fig4.update_layout(height=380, xaxis_title="تاریخ", yaxis_title="°C")
-                st.plotly_chart(fig4, use_container_width=True)
+# ---------------- اعلان ----------------
+with tab_alert:
+    st.subheader("پیش‌نویس اعلان")
+    crit_rows = show[show["وضعیت"].astype(str).str.contains("بحرانی|هشدار")]
+    if crit_rows.empty:
+        st.success("در بازه انتخاب‌شده ردیف بحرانی یا هشدار وجود ندارد.")
+    else:
+        lines = ["گزارش پایش ارتعاشات — %s" % equip, "بازه: %s" % caption_dates, ""]
+        for _, r in crit_rows.iterrows():
+            lines.append(
+                "%s | %s %s | %s | افقی %.1f / عمودی %.1f / محوری %.1f | %s"
+                % (
+                    r["تاریخ"], r["نقطه"], "(%s)" % r["شرح نقطه"] if r["شرح نقطه"] else "",
+                    r["شماره بیرینگ"] or "بدون بیرینگ",
+                    r["افقی"] if pd.notna(r["افقی"]) else 0.0,
+                    r["عمودی"] if pd.notna(r["عمودی"]) else 0.0,
+                    r["محوری"] if pd.notna(r["محوری"]) else 0.0,
+                    r["وضعیت"],
+                )
+            )
+        draft = "\n".join(lines)
+        edited = st.text_area("متن آماده ارسال (قابل ویرایش)", draft, height=260)
+
+        to_addr = st.text_input("گیرنده ایمیل", value=_secret("ALERT_EMAIL", ""))
+        subject = "هشدار ارتعاش — %s — %s" % (equip, caption_dates)
+        import urllib.parse as up
+        mailto = "mailto:%s?subject=%s&body=%s" % (
+            to_addr, up.quote(subject), up.quote(edited)
+        )
+        st.markdown("[📨 باز کردن برنامه ایمیل با متن آماده](%s)" % mailto)
+        st.caption("روش جایگزین: متن را کپی کن و در ایمیل یا پیام‌رسان سازمانی بفرست.")
+
+        if st.button("ثبت در تاریخچه"):
+            st.session_state.setdefault("alert_history", []).append(
+                {"time": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                 "equip": equip, "rows": len(crit_rows)}
+            )
+            st.success("در تاریخچه ثبت شد.")
+
+        hist = st.session_state.get("alert_history", [])
+        if hist:
+            st.markdown("**تاریخچه اعلان‌ها**")
+            st.dataframe(pd.DataFrame(hist), use_container_width=True, hide_index=True)
+
+# ---------------- کاربران ----------------
+with tab_users:
+    st.subheader("مدیریت کاربران")
+    st.session_state.setdefault("users", {"admin": "admin"})
+    st.session_state.setdefault("is_owner", False)
+
+    if not st.session_state["is_owner"]:
+        pw = st.text_input("رمز مالک سیستم", type="password")
+        if st.button("ورود به بخش مدیریت"):
+            if pw and pw == st.session_state["users"].get("admin", "admin"):
+                st.session_state["is_owner"] = True
+                st.rerun()
             else:
-                st.info("ستون دما در شیت ارتعاشات موجود نیست یا خالی است.")
-                pts = df.groupby(C_PT)["_mx"].mean().reset_index()
-                fig4 = px.bar(pts, x=C_PT, y="_mx", title="میانگین ارتعاش هر نقطه")
-                fig4.update_layout(height=380)
-                st.plotly_chart(fig4, use_container_width=True)
-
-with tab3:
-    st.markdown("#### 📨 ارسال اعلان وضعیت بحرانی")
-    crit = df[df[C_ST] == "بحرانی"].copy()
-    if crit.empty:
-        st.success("در بازه انتخاب‌شده هیچ رکورد بحرانی ثبت نشده است. ✅")
-    elif not can_send:
-        st.warning("نقش کاربری شما مجوز ارسال اعلان ندارد.")
+                st.error("رمز نادرست است.")
+        st.caption("نام کاربری پیش‌فرض: admin — رمز پیش‌فرض: admin (بعد از ورود عوض کن)")
     else:
-        st.error(f"🔴 {fa_num(crit[C_EQ].nunique())} تجهیز با وضعیت بحرانی در بازه انتخابی.")
-        crit["_line"] = (crit[C_EQ] + " | نقطه " + crit[C_PT] + " | " +
-                         crit[C_JDATE] + " | بیشینه " + crit["_mx"].round(2).astype(str) + " mm/s")
-        body = "گزارش پایش وضعیت - سیمان تهران\n"
-        body += f"مسیر: {' ➔ '.join(path)}\n"
-        body += "=" * 40 + "\n"
-        body += "\n".join(crit["_line"].tolist())
-        body += "\n\n" + "=" * 40 + "\n"
-        body += f"تهیه‌کننده: {uinfo['name']} ({uinfo['role']})\n"
-
-        rcpt = st.multiselect("گیرندگان", list(USER_DB.keys()),
-                              default=[OWNER_EMAIL], format_func=lambda x: f"{USER_DB[x]['name']} - {USER_DB[x]['role']}")
-        subject = st.text_input("موضوع", "🚨 هشدار بحرانی ارتعاش - سیمان تهران")
-        body = st.text_area("متن اعلان", body, height=260)
-        st.download_button("⬇️ دانلود متن اعلان", body.encode("utf-8-sig"),
-                           file_name="alert.txt", mime="text/plain")
-        if rcpt:
-            import urllib.parse
-            mailto = "mailto:" + ",".join(rcpt) + "?subject=" + \
-                     urllib.parse.quote(subject) + "&body=" + urllib.parse.quote(body)
-            st.markdown(f"[📧 باز کردن برنامه ایمیل و ارسال به {fa_num(len(rcpt))} گیرنده]({mailto})")
-            st.caption("برای ارسال خودکار بدون دخالت کاربر، تنظیم SMTP لازم است.")
-
-with tab4:
-    st.markdown("#### 👥 کاربران سامانه")
-    udf = pd.DataFrame([{"نام": v["name"], "ایمیل": k, "نقش": v["role"],
-                         "ارسال اعلان": "✅" if (k == OWNER_EMAIL or any(x in v["role"] for x in SEND_ROLES)) else "⛔"}
-                        for k, v in USER_DB.items()])
-    st.dataframe(udf, use_container_width=True, hide_index=True)
-
-    if is_owner:
-        st.markdown("##### ✏️ تغییر رمز (در حافظه همین نشست)")
-        with st.form("pw"):
-            target = st.selectbox("کاربر", list(USER_DB.keys()),
-                                  format_func=lambda x: f"{USER_DB[x]['name']} ({x})")
-            newpw = st.text_input("رمز جدید", type="password")
-            if st.form_submit_button("ثبت رمز"):
-                if newpw and len(newpw) >= 6:
-                    USER_DB[target]["password"] = newpw
-                    st.success("رمز در این نشست تغییر کرد. برای دائمی شدن، مقدار USER_DB را در کد ویرایش کن.")
+        st.success("دسترسی مالک سیستم فعال است.")
+        st.dataframe(
+            pd.DataFrame(
+                [{"کاربر": k, "رمز": "*" * len(v)} for k, v in st.session_state["users"].items()]
+            ),
+            use_container_width=True, hide_index=True,
+        )
+        with st.form("add_user"):
+            nu = st.text_input("نام کاربر جدید")
+            npw = st.text_input("رمز", type="password")
+            if st.form_submit_button("افزودن / تغییر رمز"):
+                if nu and npw:
+                    st.session_state["users"][nu] = npw
+                    st.success("ذخیره شد.")
                 else:
-                    st.warning("رمز باید حداقل ۶ نویسه باشد.")
-    else:
-        st.caption("ویرایش کاربران فقط برای مالک سیستم فعال است.")
+                    st.error("نام و رمز را پر کن.")
+        with st.form("change_pw"):
+            old = st.text_input("رمز فعلی", type="password")
+            new = st.text_input("رمز جدید", type="password")
+            if st.form_submit_button("تغییر رمز مالک"):
+                if old == st.session_state["users"].get("admin") and new:
+                    st.session_state["users"]["admin"] = new
+                    st.success("رمز تغییر کرد.")
+                else:
+                    st.error("رمز فعلی نادرست است.")
+        if st.button("خروج از حالت مالک"):
+            st.session_state["is_owner"] = False
+            st.rerun()
+
+st.divider()
+st.caption(
+    "حد هشدار ۴/۵ و حد بحرانی ۷ میلی‌متر بر ثانیه. "
+    "شرح نقاط از دیکشنری POINT_LABELS در ابتدای فایل قابل ویرایش است."
+)
