@@ -21,30 +21,48 @@ import pandas as pd
 import requests
 import streamlit as st
 
-# تنظیمات صفحه (این فقط برای تب بالای مرورگر است)
+# 1. تنظیمات صفحه (تب بالا)
 st.set_page_config(
+    page_title="سامانه پایش سیمان تهران",
     page_icon="📈",
     layout="wide"
 )
 
-# عنوان اصلی در وسط صفحه (این همان که بزرگ دیده می‌شود)
-st.title("📈 سامانه هوشمند پایش وضعیت ـ سیمان تهران")
+# 2. هدر: لوگو | عنوان وسط | لوگو
+h_left, h_mid, h_right = st.columns([1, 4, 1], gap="small")
 
+with h_left:
+    try:
+        st.image("logo1.png", width=150) 
+    except:
+        st.write("🏢")
+
+with h_mid:
+    st.markdown(
+        """
+<div dir="rtl" style="text-align:center;">
+  <h1 style="margin:0; padding-top:10px; line-height:1.7; font-weight:800;">
+    📈 سامانه هوشمند پایش وضعیت ـ سیمان تهران
+  </h1>
+</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with h_right:
+    try:
+        st.image("logo2.png", width=150)
+    except:
+        st.write("🏗️")
+
+st.divider()
+
+# 3. تابع دریافت Secrets (فقط یک بار)
 def _secret(key, default):
     try:
         return st.secrets.get(key, default)
     except Exception:
         return default
-
-SHEET_ID = str(_secret("SHEET_ID", "")).strip()
-SHEET_VIB = "ارتعاشات"
-SHEET_ASSETS = "Assets"
-def _secret(key, default):
-    try:
-        return st.secrets.get(key, default)
-    except Exception:
-        return default
-
 
 SHEET_ID = str(_secret("SHEET_ID", "")).strip()
 SHEET_VIB = "ارتعاشات"
