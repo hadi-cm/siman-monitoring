@@ -74,9 +74,9 @@ def build_sample_df():
                 title = eq + ' - ' + unit
                 base = rng.uniform(1.5, 8.0)
                 for day in range(30):
-                    amp_h = base  rng.uniform(0.85, 1.9)
-                    amp_v = base  rng.uniform(0.85, 1.9)
-                    amp_a = base  rng.uniform(0.85, 1.9)
+                    amp_h = base * rng.uniform(0.85, 1.9)
+                    amp_v = base * rng.uniform(0.85, 1.9)
+                    amp_a = base * rng.uniform(0.85, 1.9)
                     temp = rng.uniform(45, 85)
                     worst = max(amp_h, amp_v, amp_a)
                     if worst < 4.5:
