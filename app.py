@@ -22,17 +22,23 @@ import pandas as pd
 import requests
 import streamlit as st
 
-# ============================================================
-# تنظیمات پایه
-# ============================================================
-`# تنظیمات صفحه و عنوان`
 st.set_page_config(
-    page_title="سامانه هوشمند پایش وضعیت ـ سیمان تهران",
+    page_title="Siman Tehran",
     page_icon="📈",
     layout="wide"
 )
 
 st.title("📈 سامانه هوشمند پایش وضعیت ـ سیمان تهران")
+
+def _secret(key, default):
+    try:
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
+SHEET_ID = str(_secret("SHEET_ID", "")).strip()
+SHEET_VIB = "ارتعاشات"
+SHEET_ASSETS = "Assets"
 def _secret(key, default):
     try:
         return st.secrets.get(key, default)
