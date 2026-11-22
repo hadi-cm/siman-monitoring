@@ -227,8 +227,8 @@ def logo(path, fallback):
         st.image(path, use_container_width=True)
     else:
         st.markdown(
-            \"<div style='border:1px solid #d9e2ec;border-radius:10px;padding:14px;\"
-            \"text-align:center;color:#5b6b7c;font-size:13px'>\" + fallback + '</div>',
+            "<div style='border:1px solid #d9e2ec;border-radius:10px;padding:14px;"
+            "text-align:center;color:#5b6b7c;font-size:13px'>\" + fallback + '</div>',
             unsafe_allow_html=True,
         )
 
@@ -238,8 +238,8 @@ with c1:
     logo('my_logo.png', 'لوگوی شما')
 with c2:
     st.markdown(
-        \"<h2 style='text-align:center;color:#0b3c6b;margin-bottom:0'>\" + APP_TITLE + '</h2>'
-        \"<p style='text-align:center;color:#7a8794;font-size:13px;margin-top:4px'>\"
+        "<h2 style='text-align:center;color:#0b3c6b;margin-bottom:0'>\" + APP_TITLE + '</h2>'
+        "<p style='text-align:center;color:#7a8794;font-size:13px;margin-top:4px'>\"
         'پایش برخط ارتعاش و دمای تجهیزات</p>',
         unsafe_allow_html=True,
     )
