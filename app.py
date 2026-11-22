@@ -210,7 +210,7 @@ def build_report_html(df_report, meta):
         info_lines += '<div><b>' + esc(str(key)) + ':</b> ' + esc(str(value)) + '</div>'
 
     return (
-        \"<!DOCTYPE html><html lang='fa' dir='rtl'><head><meta charset='utf-8'>\"
+        "<!DOCTYPE html><html lang='fa' dir='rtl'><head><meta charset='utf-8'>"
         '<title>گزارش پایش ارتعاش - سیمان تهران</title>' + REPORT_CSS + '</head><body>'
         '<h1>گزارش پایش وضعیت ارتعاش - سیمان تهران</h1>'
         '<div class=\"sub\">تاریخ گزارش: ' + esc(datetime.now().strftime('%Y-%m-%d %H:%M')) + '</div>'
