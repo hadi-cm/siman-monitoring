@@ -32,9 +32,7 @@ st.set_page_config(
     layout="wide"
 )
 
-`# عنوان اصلی در بالای صفحه`
 st.title("📈 سامانه هوشمند پایش وضعیت ـ سیمان تهران")
-
 def _secret(key, default):
     try:
         return st.secrets.get(key, default)
