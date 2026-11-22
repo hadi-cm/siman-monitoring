@@ -22,12 +22,14 @@ import pandas as pd
 import requests
 import streamlit as st
 
+# تنظیمات صفحه (این فقط برای تب بالای مرورگر است)
 st.set_page_config(
-    page_title="Siman Tehran",
+    page_title="سامانه هوشمند پایش وضعیت",
     page_icon="📈",
     layout="wide"
 )
 
+# عنوان اصلی در وسط صفحه (این همان که بزرگ دیده می‌شود)
 st.title("📈 سامانه هوشمند پایش وضعیت ـ سیمان تهران")
 
 def _secret(key, default):
