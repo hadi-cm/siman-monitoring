@@ -240,11 +240,8 @@ with c1:
     logo('my_logo.png', 'لوگوی شما')
 
 with c2:
-    st.markdown(f"<h2 style='text-align:center;'>{APP_TITLE}</h2>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center;color:#7a8794;font-size:13px;margin-top:4px'>پایش برخط ارتعاش و دمای تجهیزات</p>", unsafe_allow_html=True)
-'پایش برخط ارتعاش و دمای تجهیزات</p>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(f"<h2 style='text-align:center;'>{APP_TITLE}</h2><p style='text-align:center;color:#7a8794;font-size:13px;margin-top:4px'>پایش برخط ارتعاش و دمای تجهیزات</p>", unsafe_allow_html=True)
+
 with c3:
     logo('client_logo.png', 'سیمان تهران')
 
