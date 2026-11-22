@@ -1,116 +1,157 @@
 # -*- coding: utf-8 -*-
 """
-==============================================================================
- سیستم هوشمند پایش وضعیت - سیمان تهران
- نسخه 7.5  |  Vibration Condition Monitoring Dashboard
-------------------------------------------------------------------------------
- قوانین دسترسی (طبق درخواست کارفرما):
-   1) شفافیت کامل: همه کاربران همه تب‌ها و همه داده‌ها را می‌بینند.
-   2) ارسال اعلان: فقط «مدیران» (و مالک سیستم) می‌توانند دکمه ارسال را بزنند.
-   3) تغییر داده‌ها / ایمیل‌ها / رمزها: فقط «سوپرادمین» = cm.zandiyeh@gmail.com
-   4) مدیران هیچ حق تغییری در داده‌ها و کاربران ندارند، فقط ارسال فایل/اعلان.
+=============================================================
+  سیستم هوشمند پایش وضعیت ارتعاشات - سیمان تهران
+  نسخه 7.6
+-------------------------------------------------------------
+  قواعد دسترسی:
+    * همه کاربران -> همه تب‌ها و همه داده‌ها را می‌بینند (شفافیت کامل)
+    * مدیران     -> فقط دکمه «ارسال اعلان» برایشان فعال است
+    * مالک سیستم -> تنها کسی که می‌تواند کاربران و تنظیمات را تغییر دهد
+-------------------------------------------------------------
+  فایل‌های لازم در کنار همین اسکریپت:
+    client_logo.png  ->  لوگوی سیمان تهران (سمت راست سربرگ)
+    my_logo.png      ->  لوگوی شخصی        (سمت چپ سربرگ)
 
- نصب پیش‌نیازها:
-   pip install streamlit pandas plotly
- اجرا:
-   streamlit run vibration_monitor_tehran_cement_v7_5.py
+  نصب پیش‌نیازها:
+    pip install streamlit pandas numpy plotly
 
- فایل‌های کنار کد:
-   client_logo.png   -> لوگوی سیمان تهران (سمت راست هدر)
-   my_logo.png       -> لوگوی شخصی (سمت چپ هدر)
-==============================================================================
+  اجرا:
+    streamlit run app.py
+=============================================================
 """
 
-import os
-import io
-import base64
-import random
-from datetime import date
+import smtplib
+from datetime import datetime, timedelta
+from email.mime.text import MIMEText
+from pathlib import Path
 
+import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
+import plotly.express as px
 import streamlit as st
 
-try:
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
-    HAS_SMTP = True
-except Exception:
-    HAS_SMTP = False
+# ==========================================================
+#  1) تنظیمات پایه
+# ==========================================================
+st.set_page_config(
+    page_title="سیستم هوشمند پایش وضعیت - سیمان تهران",
+    page_icon="🏭",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
-# ============================================================================
-#  تنظیمات پایه
-# ============================================================================
-APP_TITLE = "سیستم هوشمند پایش وضعیت-سیمان تهران"
-APP_SUB = "پایش ارتعاشات و آنالیز وضعیت تجهیزات دوار"
-CLIENT_LOGO_FILE = "client_logo.png"
-MY_LOGO_FILE = "my_logo.png"
-DEFAULT_PASSWORD = "siman123"
+APP_TITLE = "سیستم هوشمند پایش وضعیت - سیمان تهران"
+CLIENT_LOGO = "client_logo.png"   # سیمان تهران  -> سمت راست
+MY_LOGO = "my_logo.png"           # لوگوی شخصی   -> سمت چپ
 
-# ایمیل پذیرفته‌شده حتی با تایپ اشتباه کاربر
+SUPER_ADMIN = "cm.zandiyeh@gmail.com"     # تنها کسی که حق ویرایش دارد (مالک)
+
+# ==========================================================
+#  2) پایگاه کاربران  (برای افزودن کاربر جدید فقط یک خط اضافه کن)
+# ==========================================================
+USER_DB = {
+    "cm.zandiyeh@gmail.com":         {"name": "هادی زندیه",          "role": "مالک سیستم / پیمانکار", "password": "siman123"},
+    "vah.rezaei@gmail.com":          {"name": "وحید رضایی",           "role": "مدیر فنی",              "password": "siman123"},
+    "me.vibration.shokri@gmail.com": {"name": "مهدی شکری",            "role": "مدیر پایش وضعیت",       "password": "siman123"},
+    "tehrancement@gmail.com":        {"name": "کارشناس سیمان تهران",  "role": "مدیر بهره‌برداری",      "password": "siman123"},
+    "alireza76ir@gmail.com":         {"name": "علیرضا",               "role": "کاربر",                 "password": "siman123"},
+    "operator1@tehrancement.ir":     {"name": "اپراتور خط ۱",         "role": "کاربر",                 "password": "siman123"},
+    "operator2@tehrancement.ir":     {"name": "اپراتور خط ۲",         "role": "کاربر",                 "password": "siman123"},
+}
+
+# املای جایگزین ایمیل‌ها (اگر کاربر با غلط املایی وارد شد، رد نشود)
 EMAIL_ALIASES = {
-    "tehrancement@tehrancement.ir": "tehrancment@tehrancement.ir",
-    "tehrancment@gmail.com": "tehrancment@tehrancement.ir",
-    "tehrancement@tehrancement.ir": "tehrancment@tehrancement.ir",
-    "me.vibration.shokri@gmail.com": "me.vibration.shokri@tehrancement.ir",
-    "vah.rezaei@gmail.com": "vah.rezaei@tehrancement.ir",
+    "tehrancement@gmail.com": "tehrancement@gmail.com",
+    "tehrancment@gmail.com": "tehrancement@gmail.com",
+    "tehrancment@tehrancement.ir": "tehrancement@gmail.com",
+    "alireza76ir@Gmail.com": "alireza76ir@gmail.com",
 }
 
-DEFAULT_USERS = [
-    {"email": "cm.zandiyeh@gmail.com",          "name": "هادی زندیه",       "role": "سوپرادمین", "duty": "پیمانکار خدمات / مالک سیستم", "password": "siman123"},
-    {"email": "vah.rezaei@tehrancement.ir",     "name": "وحید رضایی",       "role": "مدیر",      "duty": "مدیر تعمیرات و نگهداری",     "password": "siman123"},
-    {"email": "me.vibration.shokri@tehrancement.ir", "name": "مهدی شکری",   "role": "مدیر",      "duty": "مدیر پایش وضعیت",            "password": "siman123"},
-    {"email": "tehrancment@tehrancement.ir",    "name": "دفتر فنی سیمان تهران", "role": "مدیر",  "duty": "مدیر فنی کارخانه",           "password": "siman123"},
-    {"email": "a.karimi@tehrancement.ir",       "name": "علیرضا کریمی",     "role": "کاربر",     "duty": "کارشناس ارتعاشات",           "password": "siman123"},
-    {"email": "s.mousavi@tehrancement.ir",      "name": "سعید موسوی",       "role": "کاربر",     "duty": "سرپرست شیفت مکانیک",         "password": "siman123"},
-    {"email": "f.ahmadi@tehrancement.ir",       "name": "فاطمه احمدی",      "role": "کاربر",     "duty": "کارشناس دفتر فنی",           "password": "siman123"},
-]
-
-# آیا سوپرادمین (مالک سیستم) هم حق ارسال اعلان داشته باشد؟
-ALLOW_SUPERADMIN_SEND = True
-
-# ============================================================================
-#  ساختار خطوط و تجهیزات
-# ============================================================================
-LINES = {
-    "خط ۱": {
-        "آسیاب مواد": ["آسیاب مواد ۱", "آسیاب مواد ۲"],
-        "کوره و پخت": ["کوره ۱", "خنک‌کن ۱", "فن دودکش ۱"],
-        "آسیاب سیمان": ["آسیاب سیمان ۱", "آسیاب سیمان ۲"],
-    },
-    "خط ۲": {
-        "آسیاب مواد": ["آسیاب مواد ۳"],
-        "کوره و پخت": ["کوره ۲", "خنک‌کن ۲", "فن دودکش ۲"],
-        "آسیاب سیمان": ["آسیاب سیمان ۳", "آسیاب سیمان ۴"],
-    },
-    "خط ۳ (توسعه)": {
-        "سنگ‌شکن": ["سنگ‌شکن چکشی ۳", "نوار نقاله اصلی ۳"],
-        "آسیاب سیمان": ["آسیاب سیمان ۵", "سپراتور ۵"],
-    },
+# مدیران سازمان = فقط حق «ارسال اعلان»
+NOTIFIERS = {
+    SUPER_ADMIN,
+    "vah.rezaei@gmail.com",
+    "me.vibration.shokri@gmail.com",
+    "tehrancement@gmail.com",
 }
 
-POINTS = ["موتور اصلی", "گیربکس", "یاتاقان محرک", "فن خنک‌کن"]
+# ==========================================================
+#  3) استایل (RTL + فونت وزیرمتن)
+# ==========================================================
+st.markdown(
+    """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;700&display=swap');
 
-STATUS_ORDER = ["سالم", "هشدار", "بحرانی", "پایش ویژه", "در حال تعمیر", "خارج از سرویس"]
-STATUS_COLORS = {
-    "سالم": "#2e9e5b",
-    "هشدار": "#f2b134",
-    "بحرانی": "#d9534f",
-    "پایش ویژه": "#4a7bd6",
-    "در حال تعمیر": "#8e6bd1",
-    "خارج از سرویس": "#7a7a7a",
+html, body, [class*="css"], .stApp, .stMarkdown, .stText, input, textarea, select, button {
+    font-family: 'Vazirmatn', Tahoma, sans-serif !important;
 }
+.stApp { direction: rtl; }
+.block-container { padding-top: 1.0rem; max-width: 1450px; }
 
-# ============================================================================
-#  تبدیل تاریخ میلادی به شمسی
-# ============================================================================
+.app-title {
+    text-align: center;
+    font-size: 27px;
+    font-weight: 700;
+    color: #12395c;
+    line-height: 1.5;
+    padding-top: 26px;
+}
+.app-sub {
+    text-align: center;
+    font-size: 13px;
+    color: #6b7b8c;
+    padding-bottom: 6px;
+}
+.logo-ph {
+    border: 1px dashed #b9c6d4;
+    border-radius: 12px;
+    background: #f6f9fc;
+    color: #8a9aab;
+    font-size: 12px;
+    text-align: center;
+    padding: 22px 6px;
+}
+.kpi {
+    border: 1px solid #e2e9f0;
+    border-right: 5px solid #2e6da4;
+    border-radius: 12px;
+    background: #ffffff;
+    padding: 12px 14px;
+    box-shadow: 0 1px 4px rgba(18,57,92,.06);
+}
+.kpi .lbl { font-size: 13px; color: #6b7b8c; }
+.kpi .val { font-size: 23px; font-weight: 700; color: #12395c; }
+.kpi.warn { border-right-color: #e6a23c; }
+.kpi.bad  { border-right-color: #d9534f; }
+.kpi.ok   { border-right-color: #3fa45b; }
+.sec-title {
+    font-size: 17px; font-weight: 700; color: #12395c;
+    border-bottom: 2px solid #e2e9f0; padding-bottom: 6px; margin: 8px 0 12px 0;
+}
+div[data-testid="stTabs"] button { font-size: 15px; font-weight: 600; }
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+# ==========================================================
+#  4) توابع کمکی
+# ==========================================================
+def normalize_email(raw: str) -> str:
+    e = (raw or "").strip().lower().replace(" ", "")
+    return EMAIL_ALIASES.get(e, e)
+
+
 def g2j(gy, gm, gd):
+    """تبدیل تاریخ میلادی به شمسی"""
     g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
+    jy = 979 if gy > 1600 else 0
+    gy = gy - 1600 if gy > 1600 else gy - 621
     gy2 = gy + 1 if gm > 2 else gy
-    days = (355666 + (365 * gy) + ((gy2 + 3) // 4) - ((gy2 + 99) // 100)
-            + ((gy2 + 399) // 400) + gd + g_d_m[gm - 1])
-    jy = -1595 + (33 * (days // 12053))
+    days = (365 * gy) + ((gy2 + 3) // 4) - ((gy2 + 99) // 100) + ((gy2 + 399) // 400) - 80 + gd + g_d_m[gm - 1]
+    jy += 33 * (days // 12053)
     days %= 12053
     jy += 4 * (days // 1461)
     days %= 1461
@@ -118,598 +159,413 @@ def g2j(gy, gm, gd):
         jy += (days - 1) // 365
         days = (days - 1) % 365
     if days < 186:
-        jm = 1 + days // 31
-        jd = 1 + days % 31
+        jm, jd = 1 + days // 31, 1 + days % 31
     else:
-        jm = 7 + (days - 186) // 30
-        jd = 1 + (days - 186) % 30
+        jm, jd = 7 + (days - 186) // 30, 1 + (days - 186) % 30
     return jy, jm, jd
 
 
-# ============================================================================
-#  تولید داده نمونه (در نسخه نهایی با خواندن اکسل/دیتابیس جایگزین می‌شود)
-# ============================================================================
-def status_of(v, warn, crit):
-    if v >= crit:
-        return "بحرانی"
-    if v >= warn:
-        return "هشدار"
-    return "سالم"
+def jstr(d) -> str:
+    jy, jm, jd = g2j(d.year, d.month, d.day)
+    return f"{jy}/{jm:02d}/{jd:02d}"
+
+
+def zone_of(v: float):
+    """محدوده‌های ISO 10816 برای ماشین‌های متوسط"""
+    if v < 2.8:
+        return "سالم", "ok"
+    if v < 4.5:
+        return "پایش", "ok"
+    if v < 7.1:
+        return "هشدار", "warn"
+    return "بحرانی", "bad"
+
+
+def zone_color(z: str) -> str:
+    return {"سالم": "#3fa45b", "پایش": "#2e6da4", "هشدار": "#e6a23c", "بحرانی": "#d9534f"}.get(z, "#888")
+
+
+def logo(path: str, fallback: str):
+    if Path(path).exists():
+        try:
+            st.image(path, width=165)
+            return
+        except Exception:
+            pass
+    st.markdown(f'<div class="logo-ph">{fallback}</div>', unsafe_allow_html=True)
+
+
+# ==========================================================
+#  5) سلسله‌مراتب تجهیزات و تولید داده
+# ==========================================================
+HIERARCHY = {
+    "خط ۱": {
+        "سنگ‌شکن": ["سنگ‌شکن فکی ۱۰۱", "سنگ‌شکن چکشی ۱۰۲"],
+        "آسیاب مواد": ["آسیاب مواد ۲۰۱", "فن آسیاب مواد ۲۰۲"],
+        "کوره": ["کوره ۳۰۱", "فن دودکش ۳۰۲", "خنک‌کن ۳۰۳"],
+        "آسیاب سیمان": ["آسیاب سیمان ۴۰۱", "سپراتور ۴۰۲"],
+    },
+    "خط ۲": {
+        "سنگ‌شکن": ["سنگ‌شکن فکی ۱۱۱", "سنگ‌شکن چکشی ۱۱۲"],
+        "آسیاب مواد": ["آسیاب مواد ۲۱۱", "فن آسیاب مواد ۲۱۲"],
+        "کوره": ["کوره ۳۱۱", "فن دودکش ۳۱۲"],
+        "آسیاب سیمان": ["آسیاب سیمان ۴۱۱", "سپراتور ۴۱۲"],
+        "بارگیرخانه": ["پکیج بارگیر ۵۰۱", "کمپرسور ۵۰۲"],
+    },
+}
 
 
 @st.cache_data(show_spinner=False)
-def build_data() -> pd.DataFrame:
-    rnd = random.Random(2026)
-    end = date(2026, 11, 22)
-    dates = []
-    for i in range(59, -1, -1):
-        d = date.fromordinal(end.toordinal() - i)
-        jy, jm, jd = g2j(d.year, d.month, d.day)
-        dates.append(f"{jy:04d}/{jm:02d}/{jd:02d}")
-
+def load_data() -> pd.DataFrame:
+    rng = np.random.default_rng(1404)
+    today = datetime.now().date()
     rows = []
-    idx = 0
-    for line, units in LINES.items():
-        for unit, equips in units.items():
-            for eq in equips:
-                idx += 1
-                warn, crit = 4.5, 7.1
-                base = 1.7 + rnd.random() * 3.3
-                special = None
-                if idx % 13 == 0:
-                    special = "خارج از سرویس"
-                elif idx % 9 == 0:
-                    special = "در حال تعمیر"
-                elif idx % 7 == 0:
-                    special = "پایش ویژه"
-
-                for point in POINTS:
-                    p_base = base + rnd.random() * 1.1
-                    for ds in dates:
-                        v = p_base + rnd.gauss(0, 0.55)
-                        if rnd.random() < 0.04:
-                            v += 1.1
-                        v = round(max(0.4, v), 1)
-                        rows.append({
-                            "تاریخ": ds,
+    for line, units in HIERARCHY.items():
+        for unit, eqs in units.items():
+            for eq in eqs:
+                base = float(rng.uniform(1.7, 6.2))
+                for k in range(12):
+                    d = today - timedelta(days=int(165 - k * 15) + int(rng.integers(-3, 4)))
+                    vib = float(max(0.4, rng.normal(base, 0.9) + 0.025 * k))
+                    temp = float(rng.normal(62, 7))
+                    rpm = int(rng.integers(740, 1490))
+                    z, _ = zone_of(vib)
+                    rows.append(
+                        {
                             "خط": line,
                             "واحد": unit,
                             "تجهیز": eq,
-                            "نقطه اندازه‌گیری": point,
-                            "مقدار ارتعاش (mm/s)": v,
-                            "حد هشدار": warn,
-                            "حد بحرانی": crit,
-                            "وضعیت": special if special else status_of(v, warn, crit),
-                        })
-    return pd.DataFrame(rows)
+                            "تاریخ": d,
+                            "تاریخ شمسی": jstr(d),
+                            "ارتعاش (mm/s RMS)": round(vib, 2),
+                            "دما (°C)": round(temp, 1),
+                            "دور (RPM)": rpm,
+                            "وضعیت": z,
+                        }
+                    )
+    df = pd.DataFrame(rows).sort_values("تاریخ", ascending=False).reset_index(drop=True)
+    return df
 
 
-# ============================================================================
-#  ابزارهای کمکی
-# ============================================================================
-def logo_b64(path):
-    if os.path.exists(path):
-        try:
-            with open(path, "rb") as f:
-                return base64.b64encode(f.read()).decode()
-        except Exception:
-            return None
-    return None
+DF_ALL = load_data()
 
-
-def user_record(email):
-    if not email:
-        return None
-    for u in st.session_state.users:
-        if str(u.get("email", "")).strip().lower() == email.strip().lower():
-            return u
-    return None
-
-
-def role_of(email):
-    rec = user_record(email)
-    return (rec or {}).get("role", "کاربر")
-
-
-def is_superadmin(email):
-    return role_of(email) == "سوپرادمین"
-
-
-def is_manager(email):
-    return role_of(email) == "مدیر"
-
-
-def can_send(email):
-    return is_manager(email) or (ALLOW_SUPERADMIN_SEND and is_superadmin(email))
-
-
-def send_email(to_list, subject, body):
-    if not HAS_SMTP:
-        return False, "کتابخانه smtplib در دسترس نیست."
-    try:
-        cfg = st.secrets["smtp"]
-    except Exception:
-        return False, "تنظیمات SMTP تعریف نشده است (ارسال به صورت شبیه‌سازی ثبت شد)."
-    try:
-        msg = MIMEMultipart()
-        msg["From"] = cfg["from"]
-        msg["To"] = ", ".join(to_list)
-        msg["Subject"] = subject
-        msg.attach(MIMEText(body, "plain", "utf-8"))
-        srv = smtplib.SMTP(cfg["host"], int(cfg.get("port", 587)), timeout=25)
-        srv.starttls()
-        srv.login(cfg["user"], cfg["password"])
-        srv.sendmail(cfg["from"], list(to_list), msg.as_string())
-        srv.quit()
-        return True, "ایمیل با موفقیت ارسال شد."
-    except Exception as e:
-        return False, f"خطا در ارسال ایمیل: {e}"
-
-
-def to_csv_bytes(df: pd.DataFrame) -> bytes:
-    return df.to_csv(index=False).encode("utf-8-sig")
-
-
-# ============================================================================
-#  صفحه و استایل
-# ============================================================================
-st.set_page_config(page_title=APP_TITLE, page_icon="📈", layout="wide")
-
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;800&display=swap');
-
-html, body, [class*="css"] {
-    font-family: 'Vazirmatn', Tahoma, sans-serif;
-    direction: rtl;
-}
-.stApp { background: #f5f7fa; }
-
-.hdr {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 18px;
-    direction: rtl;
-    background: linear-gradient(120deg, #0f2d52 0%, #1b4f8a 55%, #2a6fb5 100%);
-    border-radius: 16px;
-    padding: 16px 26px;
-    box-shadow: 0 6px 20px rgba(15, 45, 82, .25);
-    margin-bottom: 14px;
-}
-.hdr-logo {
-    width: 118px; height: 78px;
-    background: rgba(255,255,255,.94);
-    border-radius: 12px;
-    display: flex; align-items: center; justify-content: center;
-    overflow: hidden;
-    flex: 0 0 auto;
-    box-shadow: 0 2px 8px rgba(0,0,0,.18);
-}
-.hdr-logo img { max-width: 108px; max-height: 70px; object-fit: contain; }
-.hdr-logo span { color: #1b4f8a; font-size: 11px; font-weight: 700; text-align: center; line-height: 1.5; }
-.hdr-title { flex: 1 1 auto; text-align: center; color: #fff; }
-.hdr-title h1 { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -.2px; }
-.hdr-title p  { margin: 6px 0 0; font-size: 13px; opacity: .85; }
-
-.filter-box {
-    background: #ffffff;
-    border: 1px solid #dde5ef;
-    border-top: 4px solid #1b4f8a;
-    border-radius: 14px;
-    padding: 12px 18px 4px;
-    margin-bottom: 14px;
-    box-shadow: 0 3px 12px rgba(20, 50, 90, .07);
-}
-.filter-box h4 { margin: 0 0 6px; color: #0f2d52; font-size: 15px; font-weight: 800; }
-
-.kpi {
-    background: #fff; border-radius: 14px; padding: 14px 16px;
-    border-right: 5px solid #1b4f8a; box-shadow: 0 3px 10px rgba(20,50,90,.07);
-}
-.kpi .lbl { font-size: 12.5px; color: #6b7a8d; margin-bottom: 6px; }
-.kpi .val { font-size: 23px; font-weight: 800; color: #0f2d52; }
-
-.userchip {
-    background: #eaf2fb; border: 1px solid #cbdcef; border-radius: 10px;
-    padding: 8px 12px; font-size: 13px; color: #16365c; margin-bottom: 10px;
-}
-.userchip b { color: #0f2d52; }
-
-div.stButton > button {
-    border-radius: 10px; font-weight: 700; padding: .5rem 1.15rem;
-}
-.stTabs [data-baseweb="tab"] { font-weight: 700; }
-</style>
-""", unsafe_allow_html=True)
-
-
-# ============================================================================
-#  وضعیت نشست
-# ============================================================================
-if "users" not in st.session_state:
-    st.session_state.users = [dict(u) for u in DEFAULT_USERS]
-if "history" not in st.session_state:
-    st.session_state.history = []
+# ==========================================================
+#  6) ورود به سیستم
+# ==========================================================
 if "user" not in st.session_state:
     st.session_state.user = None
 
-
-# ============================================================================
-#  هدر لوگو + عنوان
-# ============================================================================
-def render_header():
-    c_b64 = logo_b64(CLIENT_LOGO_FILE)
-    m_b64 = logo_b64(MY_LOGO_FILE)
-
-    right = (f'<img src="data:image/png;base64,{c_b64}" />' if c_b64
-             else '<span>لوگوی<br>سیمان تهران</span>')
-    left = (f'<img src="data:image/png;base64,{m_b64}" />' if m_b64
-            else '<span>لوگوی<br>شخصی</span>')
-
-    st.markdown(f"""
-    <div class="hdr">
-        <div class="hdr-logo">{right}</div>
-        <div class="hdr-title">
-            <h1>{APP_TITLE}</h1>
-            <p>{APP_SUB}</p>
-        </div>
-        <div class="hdr-logo">{left}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-render_header()
-
-
-# ============================================================================
-#  فرم ورود
-# ============================================================================
 if st.session_state.user is None:
-    col_l, col_m, col_r = st.columns([1, 1.4, 1])
-    with col_m:
-        st.markdown('<div class="filter-box"><h4>🔐 ورود به سامانه</h4></div>',
-                    unsafe_allow_html=True)
-        with st.form("login_form", clear_on_submit=False):
-            em = st.text_input("ایمیل سازمانی", placeholder="name@tehrancement.ir")
-            pw = st.text_input("رمز عبور", type="password", placeholder="••••••••")
+    h1, h2, h3 = st.columns([1, 3, 1])
+    with h1:
+        logo(CLIENT_LOGO, "لوگوی سیمان تهران")
+    with h2:
+        st.markdown(f'<div class="app-title">{APP_TITLE}</div>', unsafe_allow_html=True)
+        st.markdown('<div class="app-sub">ورود به سامانه پایش وضعیت ارتعاشات</div>', unsafe_allow_html=True)
+    with h3:
+        logo(MY_LOGO, "لوگوی شخصی")
+
+    st.write("")
+    _, mid, _ = st.columns([1, 1.6, 1])
+    with mid:
+        st.markdown('<div class="sec-title">🔐 ورود به سامانه</div>', unsafe_allow_html=True)
+        with st.form("login_form"):
+            email_in = st.text_input("ایمیل سازمانی", placeholder="name@tehrancement.ir")
+            pass_in = st.text_input("رمز عبور", type="password", placeholder="••••••••")
             ok = st.form_submit_button("ورود به داشبورد", use_container_width=True)
 
         if ok:
-            email = (em or "").strip().lower()
-            email = EMAIL_ALIASES.get(email, email)
-            rec = user_record(email)
-            if rec is None:
+            em = normalize_email(email_in)
+            if not em:
+                st.warning("ایمیل را وارد کنید.")
+            elif em not in USER_DB:
                 st.error("این ایمیل در سامانه ثبت نشده است.")
-            elif str(rec.get("password", "")) != (pw or ""):
+                st.caption("مدیر سیستم: cm.zandiyeh@gmail.com")
+            elif USER_DB[em]["password"] != pass_in.strip():
                 st.error("رمز عبور نادرست است.")
             else:
-                st.session_state.user = rec["email"]
+                st.session_state.user = em
                 st.rerun()
 
-        st.caption("رمز پیش‌فرض تمام کاربران:  siman123")
-        st.caption("مالک سیستم (تنها با حق تغییر تنظیمات):  cm.zandiyeh@gmail.com")
+        st.caption("رمز پیش‌فرض همه کاربران: siman123")
+        st.caption("مالک سیستم (تنها با حق تغییر تنظیمات): cm.zandiyeh@gmail.com")
     st.stop()
 
+# ==========================================================
+#  7) کاربر جاری و سطح دسترسی
+# ==========================================================
+EMAIL = st.session_state.user
+USER = USER_DB[EMAIL]
+IS_OWNER = EMAIL == SUPER_ADMIN          # حق تغییر کاربران/تنظیمات
+CAN_SEND = EMAIL in NOTIFIERS or IS_OWNER  # حق ارسال اعلان
 
-# ============================================================================
-#  پس از ورود
-# ============================================================================
-CUR = st.session_state.user
-CUR_REC = user_record(CUR) or {}
-CUR_ROLE = CUR_REC.get("role", "کاربر")
-SUPER = is_superadmin(CUR)
-MGR = is_manager(CUR)
-CAN_SEND = can_send(CUR)
-
-with st.sidebar:
+# ==========================================================
+#  8) سربرگ (لوگو | عنوان | لوگو)
+# ==========================================================
+c1, c2, c3 = st.columns([1, 3.2, 1])
+with c1:
+    logo(CLIENT_LOGO, "لوگوی سیمان تهران")
+with c2:
+    st.markdown(f'<div class="app-title">{APP_TITLE}</div>', unsafe_allow_html=True)
     st.markdown(
-        f'<div class="userchip">کاربر: <b>{CUR_REC.get("name", "-")}</b><br>'
-        f'نقش: <b>{CUR_ROLE}</b><br>سمت: {CUR_REC.get("duty", "-")}<br>'
-        f'<span style="font-size:11.5px;color:#5c6f85">{CUR}</span></div>',
-        unsafe_allow_html=True)
-    if st.button("خروج از حساب", use_container_width=True):
+        f'<div class="app-sub">کاربر: <b>{USER["name"]}</b> &nbsp;|&nbsp; '
+        f'نقش: {USER["role"]} &nbsp;|&nbsp; '
+        f'ارسال اعلان: {"مجاز ✅" if CAN_SEND else "فقط مشاهده 👁"} &nbsp;|&nbsp; '
+        f'{jstr(datetime.now().date())}</div>',
+        unsafe_allow_html=True,
+    )
+with c3:
+    logo(MY_LOGO, "لوگوی شخصی")
+    if st.button("خروج", use_container_width=True):
         st.session_state.user = None
         st.rerun()
-    st.divider()
-    st.caption("دسترسی‌ها")
-    st.caption("👁 مشاهده همه بخش‌ها: همه کاربران")
-    st.caption("📤 ارسال اعلان: فقط مدیران")
-    st.caption("✏ تغییر داده‌ها و کاربران: فقط مالک سیستم")
-
-
-# ============================================================================
-#  فیلترهای سراسری (زیر تیتر، بیرون از تب‌ها)
-# ============================================================================
-df_all = build_data()
-
-st.markdown('<div class="filter-box"><h4>🎛 فیلترهای سراسری — روی کل داشبورد اعمال می‌شود</h4></div>',
-            unsafe_allow_html=True)
-
-fc1, fc2, fc3, fc4, fc5 = st.columns([1.15, 1.15, 1.15, 1, 1])
-
-with fc1:
-    sel_lines = st.multiselect("خط تولید", list(LINES.keys()),
-                               default=list(LINES.keys()), key="f_lines")
-
-with fc2:
-    unit_opts = []
-    for ln in sel_lines:
-        for un in LINES.get(ln, {}):
-            if un not in unit_opts:
-                unit_opts.append(un)
-    sel_units = st.multiselect("واحد", unit_opts, default=unit_opts,
-                               key="f_units_" + str(abs(hash(tuple(sel_lines)))))
-
-with fc3:
-    eq_opts = []
-    for ln in sel_lines:
-        for un in sel_units:
-            for eq in LINES.get(ln, {}).get(un, []):
-                if eq not in eq_opts:
-                    eq_opts.append(eq)
-    sel_equips = st.multiselect("تجهیز", eq_opts, default=eq_opts,
-                                key="f_equip_" + str(abs(hash((tuple(sel_lines), tuple(sel_units))))))
-
-all_dates = sorted(df_all["تاریخ"].unique().tolist())
-with fc4:
-    d_from = st.selectbox("از تاریخ", all_dates, index=0, key="f_from")
-with fc5:
-    d_to = st.selectbox("تا تاریخ", all_dates, index=len(all_dates) - 1, key="f_to")
-
-if d_from > d_to:
-    d_from, d_to = d_to, d_from
-
-df = df_all[
-    df_all["خط"].isin(sel_lines)
-    & df_all["واحد"].isin(sel_units)
-    & df_all["تجهیز"].isin(sel_equips)
-    & (df_all["تاریخ"] >= d_from)
-    & (df_all["تاریخ"] <= d_to)
-].copy()
-
-st.caption(f"بازه انتخابی: {d_from} تا {d_to}  |  تعداد رکورد: {len(df):,}")
-
-if df.empty:
-    st.warning("با این فیلترها هیچ رکوردی یافت نشد. فیلترها را بازتر کنید.")
-    st.stop()
-
-
-# ============================================================================
-#  کارت‌های آماری
-# ============================================================================
-latest = df.sort_values("تاریخ").groupby(["خط", "واحد", "تجهیز"], as_index=False).tail(1)
-
-n_equip = latest["تجهیز"].nunique()
-n_crit = int((latest["وضعیت"] == "بحرانی").sum())
-n_warn = int((latest["وضعیت"] == "هشدار").sum())
-avg_v = float(df["مقدار ارتعاش (mm/s)"].mean())
-max_v = float(df["مقدار ارتعاش (mm/s)"].max())
-worst = df.loc[df["مقدار ارتعاش (mm/s)"].idxmax()]
-
-k1, k2, k3, k4, k5 = st.columns(5)
-for col, lbl, val in [
-    (k1, "تجهیزات پایش‌شده", f"{n_equip}"),
-    (k2, "تجهیزات بحرانی", f"{n_crit}"),
-    (k3, "تجهیزات هشدار", f"{n_warn}"),
-    (k4, "میانگین ارتعاش (mm/s)", f"{avg_v:.2f}"),
-    (k5, "بیشترین ارتعاش (mm/s)", f"{max_v:.1f}"),
-]:
-    col.markdown(f'<div class="kpi"><div class="lbl">{lbl}</div>'
-                 f'<div class="val">{val}</div></div>', unsafe_allow_html=True)
-
-st.caption(f"بیشترین مقدار ثبت‌شده در بازه: {worst['تجهیز']} — "
-           f"{worst['نقطه اندازه‌گیری']} — {worst['مقدار ارتعاش (mm/s)']} mm/s — {worst['تاریخ']}")
-st.write("")
-
-
-# ============================================================================
-#  تب‌ها
-# ============================================================================
-tab1, tab2, tab3, tab4 = st.tabs(
-    ["📋 جدول داده‌ها", "📊 نمودارها", "📤 ارسال اعلان", "👥 مدیریت کاربران"])
-
-# ---------------------------------------------------------------- جدول
-with tab1:
-    st.subheader("داده‌های پایش ارتعاشات")
-    st.dataframe(df.sort_values(["تاریخ", "تجهیز"], ascending=[False, True]),
-                 use_container_width=True, height=470)
-
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        st.download_button("⬇ دریافت CSV داده‌های فیلترشده",
-                           data=to_csv_bytes(df),
-                           file_name="vibration_data.csv",
-                           mime="text/csv",
-                           use_container_width=True)
-    with c2:
-        summ = (df.groupby(["خط", "واحد", "تجهیز"])
-                  .agg(میانگین=("مقدار ارتعاش (mm/s)", "mean"),
-                       بیشترین=("مقدار ارتعاش (mm/s)", "max"))
-                  .reset_index().round(2))
-        st.download_button("⬇ دریافت خلاصه وضعیت تجهیزات",
-                           data=to_csv_bytes(summ),
-                           file_name="equipment_summary.csv",
-                           mime="text/csv",
-                           use_container_width=True)
-
-# ---------------------------------------------------------------- نمودارها
-with tab2:
-    col_a, col_b = st.columns([1, 1.25])
-
-    with col_a:
-        st.subheader("توزیع وضعیت تجهیزات")
-        counts = latest["وضعیت"].value_counts()
-        labels = [s for s in STATUS_ORDER if s in counts.index]
-        values = [int(counts[s]) for s in labels]
-        fig = go.Figure(go.Pie(
-            labels=labels, values=values, hole=0.45,
-            marker=dict(colors=[STATUS_COLORS[s] for s in labels],
-                        line=dict(color="#ffffff", width=2)),
-            textinfo="label+percent",
-            hovertemplate="%{label}<br>%{value} تجهیز<extra></extra>",
-        ))
-        fig.update_layout(height=430, margin=dict(t=20, b=20, l=10, r=10),
-                          showlegend=True, legend=dict(orientation="h", y=-0.12),
-                          font=dict(family="Vazirmatn, Tahoma", size=13))
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col_b:
-        st.subheader("۱۰ تجهیز با بیشترین ارتعاش")
-        top = (df.groupby("تجهیز")["مقدار ارتعاش (mm/s)"].max()
-                 .sort_values(ascending=False).head(10).sort_values())
-        colors = []
-        for v in top.values:
-            colors.append("#d9534f" if v >= 7.1 else ("#f2b134" if v >= 4.5 else "#2e9e5b"))
-        fig2 = go.Figure(go.Bar(
-            x=top.values, y=top.index, orientation="h",
-            marker=dict(color=colors),
-            text=[f"{v:.1f}" for v in top.values], textposition="outside",
-            hovertemplate="%{y}<br>%{x} mm/s<extra></extra>",
-        ))
-        fig2.add_vline(x=4.5, line_dash="dash", line_color="#f2b134",
-                       annotation_text="هشدار")
-        fig2.add_vline(x=7.1, line_dash="dash", line_color="#d9534f",
-                       annotation_text="بحرانی")
-        fig2.update_layout(height=430, margin=dict(t=20, b=20, l=10, r=30),
-                           xaxis_title="mm/s RMS",
-                           font=dict(family="Vazirmatn, Tahoma", size=12))
-        st.plotly_chart(fig2, use_container_width=True)
-
-# ---------------------------------------------------------------- اعلان
-with tab3:
-    st.subheader("ارسال اعلان وضعیت بحرانی")
-
-    worst10 = (df.groupby(["خط", "واحد", "تجهیز", "نقطه اندازه‌گیری"])
-                 ["مقدار ارتعاش (mm/s)"].max().reset_index()
-                 .sort_values("مقدار ارتعاش (mm/s)", ascending=False)
-                 .head(10).round(2))
-
-    st.markdown("**۱۰ مورد نیازمند توجه در بازه انتخابی:**")
-    st.dataframe(worst10, use_container_width=True, height=280)
-
-    rc = st.multiselect("گیرندگان ایمیل",
-                        [f"{u['name']} — {u['email']}" for u in st.session_state.users],
-                        default=[f"{u['name']} — {u['email']}" for u in st.session_state.users])
-
-    subject = st.text_input("موضوع پیام",
-                            value=f"هشدار ارتعاشات تجهیزات — {d_from} تا {d_to}")
-
-    lines_txt = [f"گزارش وضعیت ارتعاشات سیمان تهران",
-                 f"بازه: {d_from} تا {d_to}",
-                 f"تعداد تجهیزات بحرانی: {n_crit} | هشدار: {n_warn}",
-                 "",
-                 "موارد بحرانی:"]
-    crit_rows = df[df["وضعیت"] == "بحرانی"].sort_values("مقدار ارتعاش (mm/s)", ascending=False).head(15)
-    if crit_rows.empty:
-        lines_txt.append("- مورد بحرانی ثبت نشده است.")
-    else:
-        for _, r in crit_rows.iterrows():
-            lines_txt.append(f"- {r['خط']} / {r['واحد']} / {r['تجهیز']} — "
-                             f"{r['نقطه اندازه‌گیری']}: {r['مقدار ارتعاش (mm/s)']} mm/s ({r['تاریخ']})")
-    lines_txt += ["", "این پیام به صورت خودکار از سامانه پایش وضعیت ارسال شده است."]
-    body = st.text_area("متن پیام", value="\n".join(lines_txt), height=220)
-
-    b1, b2 = st.columns([1, 2])
-    with b1:
-        do_send = st.button(
-            "📨 ارسال اعلان",
-            disabled=not CAN_SEND,
-            use_container_width=True,
-            help="ارسال فقط برای مدیران مجاز است."
-        )
-    with b2:
-        if not CAN_SEND:
-            st.info("شما دسترسی ارسال ندارید؛ فقط مدیران می‌توانند اعلان ارسال کنند. "
-                    "مشاهده همه بخش‌ها برای شما آزاد است.")
-
-    if do_send:
-        if not rc:
-            st.warning("حداقل یک گیرنده انتخاب کنید.")
-        else:
-            emails = [x.split(" — ")[-1].strip() for x in rc]
-            success, msg = send_email(emails, subject, body)
-            st.session_state.history.append({
-                "زمان": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
-                "فرستنده": CUR_REC.get("name", CUR),
-                "گیرندگان": len(emails),
-                "موضوع": subject,
-                "نتیجه": "ارسال واقعی" if success else "شبیه‌سازی",
-            })
-            if success:
-                st.success(msg)
-            else:
-                st.warning(msg + " — اعلان در تاریخچه ثبت شد.")
-
-    if st.session_state.history:
-        st.divider()
-        st.markdown("**تاریخچه اعلان‌ها:**")
-        hist = pd.DataFrame(st.session_state.history[::-1])
-        st.dataframe(hist, use_container_width=True)
-        st.download_button("⬇ دریافت تاریخچه اعلان‌ها (CSV)",
-                           data=to_csv_bytes(hist),
-                           file_name="notification_history.csv",
-                           mime="text/csv")
-
-    st.divider()
-    st.caption("برای ارسال واقعی ایمیل، فایل .streamlit/secrets.toml را طبق راهنما بسازید.")
-
-# ---------------------------------------------------------------- کاربران
-with tab4:
-    st.subheader("کاربران سامانه")
-    if SUPER:
-        st.caption("شما مالک سیستم هستید: می‌توانید نام، نقش و رمز کاربران را تغییر دهید.")
-    else:
-        st.caption("مشاهده برای همه آزاد است؛ تغییر کاربران فقط توسط مالک سیستم انجام می‌شود.")
-
-    users_df = pd.DataFrame(st.session_state.users)[["name", "email", "role", "duty", "password"]]
-    users_df.columns = ["نام", "ایمیل", "نقش", "سمت", "رمز عبور"]
-
-    if SUPER:
-        edited = st.data_editor(
-            users_df,
-            use_container_width=True,
-            num_rows="dynamic",
-            disabled=["ایمیل"],
-            column_config={
-                "نقش": st.column_config.SelectboxColumn(
-                    "نقش", options=["سوپرادمین", "مدیر", "کاربر"], required=True),
-                "رمز عبور": st.column_config.TextColumn("رمز عبور"),
-            },
-            key="users_editor",
-        )
-        if st.button("💾 ذخیره تغییرات کاربران", use_container_width=False):
-            new_users = []
-            for _, r in edited.iterrows():
-                em = str(r["ایمیل"]).strip().lower()
-                if not em:
-                    continue
-                new_users.append({
-                    "email": em,
-                    "name": str(r["نام"]).strip(),
-                    "role": str(r["نقش"]).strip() or "کاربر",
-                    "duty": str(r["سمت"]).strip(),
-                    "password": str(r["رمز عبور"]).strip() or DEFAULT_PASSWORD,
-                })
-            if new_users:
-                st.session_state.users = new_users
-                st.success("تغییرات کاربران ذخیره شد.")
-                st.rerun()
-            else:
-                st.error("جدول نمی‌تواند خالی باشد.")
-    else:
-        masked = users_df.copy()
-        masked["رمز عبور"] = "••••••"
-        st.dataframe(masked, use_container_width=True)
-
-    st.divider()
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        st.download_button("⬇ دریافت فهرست کاربران (CSV)",
-                           data=to_csv_bytes(users_df),
-                           file_name="users.csv",
-                           mime="text/csv",
-                           use_container_width=True)
 
 st.divider()
-st.caption(f"© {APP_TITLE} — نسخه 7.5 | تهیه و توسعه: هادی زندیه (پیمانکار خدمات)")
+
+# ==========================================================
+#  9) فیلترهای سراسری زنجیره‌ای
+# ==========================================================
+st.markdown('<div class="sec-title">🔎 فیلترهای سراسری</div>', unsafe_allow_html=True)
+
+f1, f2, f3 = st.columns(3)
+lines = ["همه خطوط"] + list(HIERARCHY.keys())
+line_sel = f1.selectbox("خط تولید", lines, index=0)
+
+unit_pool = sorted({u for ln in (HIERARCHY if line_sel == "همه خطوط" else {line_sel: HIERARCHY[line_sel]})
+                    for u in HIERARCHY[line_sel]}) if line_sel != "همه خطوط" else sorted({u for ln in HIERARCHY.values() for u in ln})
+units = ["همه واحدها"] + unit_pool
+unit_sel = f2.selectbox("واحد", units, index=0)
+
+if line_sel == "همه خطوط":
+    eq_pool = sorted({e for ln in HIERARCHY.values() for us in ln.values() for e in us})
+elif unit_sel == "همه واحدها":
+    eq_pool = sorted({e for us in HIERARCHY[line_sel].values() for e in us})
+else:
+    eq_pool = sorted(HIERARCHY[line_sel][unit_sel])
+eqs = ["همه تجهیزات"] + eq_pool
+eq_sel = f3.selectbox("تجهیز", eqs, index=0)
+
+# فیلتر بازه زمانی (روی تاریخ‌های موجود، نمایش شمسی)
+date_opts = sorted(DF_ALL["تاریخ شمسی"].unique())
+if len(date_opts) >= 2:
+    rng_sel = st.select_slider("بازه زمانی", options=date_opts, value=(date_opts[0], date_opts[-1]))
+else:
+    rng_sel = (date_opts[0], date_opts[-1])
+
+DF = DF_ALL.copy()
+if line_sel != "همه خطوط":
+    DF = DF[DF["خط"] == line_sel]
+if unit_sel != "همه واحدها":
+    DF = DF[DF["واحد"] == unit_sel]
+if eq_sel != "همه تجهیزات":
+    DF = DF[DF["تجهیز"] == eq_sel]
+DF = DF[(DF["تاریخ شمسی"] >= rng_sel[0]) & (DF["تاریخ شمسی"] <= rng_sel[1])]
+
+if DF.empty:
+    st.warning("برای این ترکیب فیلتر، داده‌ای ثبت نشده است. فیلترها را تغییر دهید.")
+    st.stop()
+
+# ==========================================================
+# 10) کارت‌های آماری
+# ==========================================================
+latest = DF.sort_values("تاریخ").groupby(["خط", "واحد", "تجهیز"], as_index=False).last()
+n_all = len(latest)
+n_crit = int((latest["وضعیت"] == "بحرانی").sum())
+n_warn = int((latest["وضعیت"] == "هشدار").sum())
+avg_vib = float(latest["ارتعاش (mm/s RMS)"].mean())
+
+k1, k2, k3, k4 = st.columns(4)
+with k1:
+    st.markdown(f'<div class="kpi"><div class="lbl">تجهیزات پایش‌شده</div><div class="val">{n_all}</div></div>', unsafe_allow_html=True)
+with k2:
+    st.markdown(f'<div class="kpi ok"><div class="lbl">میانگین ارتعاش</div><div class="val">{avg_vib:.2f} <span style="font-size:13px">mm/s</span></div></div>', unsafe_allow_html=True)
+with k3:
+    st.markdown(f'<div class="kpi warn"><div class="lbl">وضعیت هشدار</div><div class="val">{n_warn}</div></div>', unsafe_allow_html=True)
+with k4:
+    st.markdown(f'<div class="kpi bad"><div class="lbl">وضعیت بحرانی</div><div class="val">{n_crit}</div></div>', unsafe_allow_html=True)
+
+st.write("")
+
+# ==========================================================
+# 11) تب‌ها (برای همه کاربران باز است)
+# ==========================================================
+t1, t2, t3, t4 = st.tabs(["📋 جدول داده‌ها", "📊 نمودارها", "📨 ارسال اعلان", "👤 مدیریت کاربران"])
+
+# ---------- تب ۱: جدول ----------
+with t1:
+    st.markdown('<div class="sec-title">داده‌های اندازه‌گیری</div>', unsafe_allow_html=True)
+    show = DF.sort_values("تاریخ", ascending=False)
+    st.dataframe(
+        show[["خط", "واحد", "تجهیز", "تاریخ شمسی", "ارتعاش (mm/s RMS)", "دما (°C)", "دور (RPM)", "وضعیت"]],
+        use_container_width=True,
+        hide_index=True,
+        height=430,
+    )
+    st.download_button(
+        "⬇️ دانلود CSV",
+        data=show.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"vibration_{datetime.now():%Y%m%d}.csv",
+        mime="text/csv",
+    )
+
+# ---------- تب ۲: نمودارها ----------
+with t2:
+    g1, g2 = st.columns([1.4, 1])
+
+    with g1:
+        st.markdown('<div class="sec-title">۱۰ تجهیز با بالاترین ارتعاش</div>', unsafe_allow_html=True)
+        top = latest.sort_values("ارتعاش (mm/s RMS)", ascending=False).head(10).iloc[::-1]
+        fig = px.bar(
+            top, x="ارتعاش (mm/s RMS)", y="تجهیز", orientation="h",
+            color="وضعیت", color_discrete_map={z: zone_color(z) for z in ["سالم", "پایش", "هشدار", "بحرانی"]},
+            text="ارتعاش (mm/s RMS)",
+        )
+        fig.update_layout(height=430, margin=dict(l=10, r=10, t=10, b=10),
+                          legend_title_text="وضعیت", yaxis_title="", xaxis_title="mm/s RMS")
+        st.plotly_chart(fig, use_container_width=True)
+
+    with g2:
+        st.markdown('<div class="sec-title">سهم وضعیت‌ها</div>', unsafe_allow_html=True)
+        cnt = latest["وضعیت"].value_counts().reset_index()
+        cnt.columns = ["وضعیت", "تعداد"]
+        pie = px.pie(cnt, names="وضعیت", values="تعداد", hole=0.45,
+                     color="وضعیت", color_discrete_map={z: zone_color(z) for z in cnt["وضعیت"]})
+        pie.update_layout(height=430, margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(pie, use_container_width=True)
+
+    st.markdown('<div class="sec-title">روند ارتعاش تجهیز انتخابی</div>', unsafe_allow_html=True)
+    pick = st.selectbox("تجهیز برای نمایش روند", sorted(DF["تجهیز"].unique()))
+    trend = DF[DF["تجهیز"] == pick].sort_values("تاریخ")
+    lf = px.line(trend, x="تاریخ شمسی", y="ارتعاش (mm/s RMS)", markers=True)
+    lf.add_hline(y=4.5, line_dash="dash", line_color="#e6a23c", annotation_text="هشدار")
+    lf.add_hline(y=7.1, line_dash="dash", line_color="#d9534f", annotation_text="بحرانی")
+    lf.update_layout(height=330, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="", yaxis_title="mm/s RMS")
+    st.plotly_chart(lf, use_container_width=True)
+
+# ---------- تب ۳: اعلان ----------
+with t3:
+    st.markdown('<div class="sec-title">ارسال اعلان به مدیران و کارشناسان</div>', unsafe_allow_html=True)
+
+    if "notif_log" not in st.session_state:
+        st.session_state.notif_log = []
+
+    left, right = st.columns([1, 1.35])
+
+    with left:
+        st.markdown("**گیرندگان**")
+        name_to_mail = {v["name"]: k for k, v in USER_DB.items()}
+        recv = st.multiselect("گیرندگان (پیش‌فرض: همه)", list(name_to_mail.keys()), default=list(name_to_mail.keys()))
+        subject = st.text_input("موضوع", value=f"گزارش وضعیت ارتعاشات - {jstr(datetime.now().date())}")
+
+        crit_list = latest[latest["وضعیت"].isin(["بحرانی", "هشدار"])].sort_values(
+            "ارتعاش (mm/s RMS)", ascending=False)
+        body_default = (
+            f"گزارش وضعیت پایش ارتعاشات\n"
+            f"خط: {line_sel} | واحد: {unit_sel} | تجهیز: {eq_sel}\n"
+            f"بازه: {rng_sel[0]} تا {rng_sel[1]}\n"
+            f"تعداد تجهیزات بحرانی: {n_crit} | هشدار: {n_warn}\n\n"
+            + ("\n".join([f"- {r['تجهیز']} ({r['واحد']}): {r['ارتعاش (mm/s RMS)']} mm/s - {r['وضعیت']}"
+                          for _, r in crit_list.head(10).iterrows()]) or "موردی نیازمند توجه نیست.")
+        )
+        body = st.text_area("متن پیام (خودکار از داده‌های فیلترشده پر می‌شود)", value=body_default, height=210)
+
+        if CAN_SEND:
+            if st.button("📨 ارسال اعلان", type="primary", use_container_width=True):
+                rec_mails = [name_to_mail[n] for n in recv]
+                sent_real = False
+                try:
+                    smtp = st.secrets.get("smtp", None)
+                    if smtp and rec_mails:
+                        msg = MIMEText(body, "plain", "utf-8")
+                        msg["Subject"] = subject
+                        msg["From"] = smtp.get("from", smtp["user"])
+                        msg["To"] = ", ".join(rec_mails)
+                        with smtplib.SMTP(smtp["host"], int(smtp.get("port", 587))) as s:
+                            s.starttls()
+                            s.login(smtp["user"], smtp["password"])
+                            s.sendmail(msg["From"], rec_mails, msg.as_string())
+                        sent_real = True
+                except Exception as ex:
+                    st.warning(f"ارسال ایمیل واقعی انجام نشد ({ex}). اعلان در تاریخچه ثبت شد.")
+
+                st.session_state.notif_log.insert(0, {
+                    "زمان": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "فرستنده": USER["name"],
+                    "موضوع": subject,
+                    "گیرندگان": "، ".join(recv),
+                    "وضعیت": "ایمیل ارسال شد" if sent_real else "ثبت در سیستم (شبیه‌سازی)",
+                })
+                st.success(f"اعلان برای {len(recv)} گیرنده ثبت شد.")
+        else:
+            st.info("👁 مشاهده فعال است؛ ارسال اعلان فقط توسط مدیران سازمان انجام می‌شود.")
+
+    with right:
+        st.markdown("**تجهیزات نیازمند توجه (بر اساس فیلتر فعلی)**")
+        view = crit_list[["تجهیز", "واحد", "ارتعاش (mm/s RMS)", "وضعیت"]].head(10)
+        if view.empty:
+            st.success("همه تجهیزات در محدوده مجاز هستند. ✅")
+        else:
+            st.dataframe(view, use_container_width=True, hide_index=True, height=300)
+
+        st.markdown("**تاریخچه اعلان‌ها**")
+        if st.session_state.notif_log:
+            log_df = pd.DataFrame(st.session_state.notif_log)
+            st.dataframe(log_df, use_container_width=True, hide_index=True, height=220)
+            st.download_button(
+                "⬇️ دانلود تاریخچه اعلان‌ها (CSV)",
+                data=log_df.to_csv(index=False).encode("utf-8-sig"),
+                file_name="notifications.csv",
+                mime="text/csv",
+            )
+        else:
+            st.caption("هنوز اعلانی ارسال نشده است.")
+
+# ---------- تب ۴: مدیریت کاربران ----------
+with t4:
+    st.markdown('<div class="sec-title">کاربران سامانه</div>', unsafe_allow_html=True)
+
+    rows = []
+    for em, info in USER_DB.items():
+        rows.append({
+            "ایمیل": em,
+            "نام": info["name"],
+            "نقش": info["role"],
+            "رمز عبور": info["password"] if IS_OWNER else "********",
+            "ارسال اعلان": "✅" if em in NOTIFIERS else "—",
+            "تغییر تنظیمات": "✅" if em == SUPER_ADMIN else "—",
+        })
+    users_df = pd.DataFrame(rows)
+    st.dataframe(users_df, use_container_width=True, hide_index=True, height=330)
+
+    if IS_OWNER:
+        st.markdown("**✏️ ویرایش کاربران (فقط مالک سیستم)**")
+        edited = st.data_editor(
+            users_df, use_container_width=True, hide_index=True, num_rows="dynamic",
+            key="users_editor",
+            column_config={
+                "ایمیل": st.column_config.TextColumn(required=True),
+                "نقش": st.column_config.SelectboxColumn(
+                    options=["مالک سیستم / پیمانکار", "مدیر فنی", "مدیر پایش وضعیت",
+                             "مدیر بهره‌برداری", "کاربر"]),
+            },
+        )
+        if st.button("💾 ذخیره تغییرات کاربران", type="primary"):
+            new_db = {}
+            for _, r in edited.iterrows():
+                em = normalize_email(str(r["ایمیل"]))
+                if not em:
+                    continue
+                new_db[em] = {
+                    "name": str(r["نام"]) if pd.notna(r["نام"]) else em,
+                    "role": str(r["نقش"]) if pd.notna(r["نقش"]) else "کاربر",
+                    "password": str(r["رمز عبور"]) if pd.notna(r["رمز عبور"]) and str(r["رمز عبور"]).strip() not in ("", "********") else "siman123",
+                }
+            USER_DB.clear()
+            USER_DB.update(new_db)
+            st.success("تغییرات کاربران ذخیره شد (تا پایان اجرای برنامه).")
+            st.rerun()
+    else:
+        st.caption("ویرایش کاربران و رمزها فقط در اختیار مالک سیستم است. سایر کاربران فقط مشاهده می‌کنند.")
+
+st.divider()
+st.caption("سیستم هوشمند پایش وضعیت - سیمان تهران | نسخه 7.6 | محدوده‌های هشدار بر پایه ISO 10816")
