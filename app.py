@@ -545,4 +545,3 @@ with tab4:
 
 st.divider()
 st.caption('آخرین به‌روزرسانی: ' + datetime.now().strftime('%Y-%m-%d %H:%M') + ' - سیمان تهران')
-"/>
