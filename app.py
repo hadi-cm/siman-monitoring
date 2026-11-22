@@ -23,7 +23,6 @@ import streamlit as st
 
 # تنظیمات صفحه (این فقط برای تب بالای مرورگر است)
 st.set_page_config(
-    page_title="سامانه هوشمند پایش وضعیت",
     page_icon="📈",
     layout="wide"
 )
