@@ -1,492 +1,573 @@
 # -*- coding: utf-8 -*-
 """
-سیستم هوشمند پایش وضعیت ارتعاشات - سیمان تهران
-------------------------------------------------
-نسخه‌ی اصلاح‌شده:
-  * عنوان کادر: سیستم هوشمند پایش وضعیت - سیمان تهران
-  * فیلترهای زنجیره‌ای و واقعی: خط تولید -> واحد -> نام تجهیز
-  * حذف کامل جدول پیش‌نمایش
-  * شمارش تعداد نقاط فقط برای تجهیز انتخاب‌شده
-  * مقاوم در برابر نیم‌فاصله، فاصله اضافه، «ي/ك» عربی و «ی/ک» فارسی
-  * امکان اجرا با Google Sheets یا با فایل CSV/Excel محلی (حالت آفلاین)
+سیستم هوشمند پایش وضعیت ارتعاش - سیمان تهران
+نسخه: v6.4
+
+تغییرات این نسخه:
+  1) شمارش نقاط نیازمند توجه حذف شد.
+  2) دسته‌بندی وضعیت دقیقاً طبق لیست تاییدشده کاربر:
+     نرمال / نیازمند مراقبت و کنترل / هشدار / خطر-بحرانی / سایر / بدون وضعیت ثبت شده
+  3) جدول، متن ستون وضعیت را عیناً (بدون هیچ تغییر) نمایش می‌دهد؛
+     دسته‌بندی فقط برای نمودار دایره‌ای انتهای صفحه استفاده می‌شود.
 
 اجرا:
-    pip install streamlit pandas gspread google-auth plotly openpyxl
-    streamlit run vibration_monitor_tehran_cement.py
+    pip install streamlit pandas openpyxl
+    streamlit run vibration_monitor_tehran_cement_v6_4.py
 """
 
-import json
+import math
+import os
 import re
-import datetime as dt
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 import pandas as pd
 import streamlit as st
 
-# ----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # تنظیمات صفحه
-# ----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="سیستم هوشمند پایش وضعیت - سیمان تهران",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded",
 )
 
-# ----------------------------------------------------------------------------
-# طرح ظاهری
-# ----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# تنظیمات اتصال به گوگل شیت (در صورت نیاز پر شود)
+#   - فایل کلید سرویس اکانت را کنار همین اسکریپت بگذارید: service_account.json
+#   - شناسه شیت را در SHEET_ID قرار دهید
+# ---------------------------------------------------------------------------
+SERVICE_ACCOUNT_FILE = "service_account.json"
+SHEET_ID = ""          # مثال: "1AbCdEfGhIjKlMnOpQrStUvWxYz"
+SHEET_NAME = "Assets"  # نام تب داخل فایل گوگل شیت
+
+# ---------------------------------------------------------------------------
+# کاربران (قابل ویرایش)
+# ---------------------------------------------------------------------------
+PASSWORD = "siman123"
+
+USERS = {
+    "zandieh@tehrancement.ir":       {"name": "مهندس هادی زندیه",        "role": "مدیر ارشد"},
+    "tehrancment@gmail.com":         {"name": "مهندس حسینی",             "role": "مدیر"},
+    "maintenance@tehrancement.ir":   {"name": "واحد نگهداری و تعمیرات",  "role": "مدیر"},
+    "production@tehrancement.ir":    {"name": "واحد تولید",              "role": "کاربر"},
+    "electrical@tehrancement.ir":    {"name": "واحد برق و ابزار دقیق",   "role": "کاربر"},
+    "quality@tehrancement.ir":       {"name": "واحد کنترل کیفیت",        "role": "کاربر"},
+    "planning@tehrancement.ir":      {"name": "واحد برنامه‌ریزی",        "role": "کاربر"},
+}
+
+# ---------------------------------------------------------------------------
+# ستون‌های شیت Assets (بر اساس فایل واقعی کاربر)
+# ---------------------------------------------------------------------------
+COLUMNS = [
+    "نام تجهیز",      # A  (در شیت با عنوان «دام تجهیز» هم دیده شده)
+    "خط تولید",       # B
+    "واحد",           # C
+    "نوع تجهیز",      # D
+    "راهنمای نقاط",   # E  -> P1, P2, ...
+    "شماره بیرینگ",   # F
+    "بوش",            # G
+    "دور نامی",       # H
+    "سیستم درایور",   # I
+    "وضعیت",          # ستون وضعیت (نوشته‌ی خود کاربر)
+]
+
+COLUMN_ALIASES = {
+    "دام تجهیز": "نام تجهیز",
+    "نام دستگاه": "نام تجهیز",
+    "تجهیز": "نام تجهیز",
+    "خط": "خط تولید",
+    "واحد تولید": "واحد",
+    "نقطه": "راهنمای نقاط",
+    "نقاط": "راهنمای نقاط",
+    "کد نقطه": "راهنمای نقاط",
+    "بیرینگ": "شماره بیرینگ",
+    "شماره برینگ": "شماره بیرینگ",
+    "شماره بیرینگ‌ها": "شماره بیرینگ",
+    "دور": "دور نامی",
+    "دور موتور": "دور نامی",
+    "درایور": "سیستم درایور",
+    "وضعیت نقطه": "وضعیت",
+}
+
+# ---------------------------------------------------------------------------
+# دسته‌بندی وضعیت (فقط برای نمودار دایره‌ای)
+# ---------------------------------------------------------------------------
+STATUS_CATEGORIES = [
+    ("نرمال",                  ["نرمال", "سالم", "خوب", "عادی"],                              "#2e7d32"),
+    ("نیازمند مراقبت و کنترل", ["نیازمند مراقبت و کنترل", "نیازمند مراقبت", "مراقبت",
+                                "نیازمند کنترل", "کنترل", "بررسی"],                            "#f9a825"),
+    ("هشدار",                  ["هشدار"],                                                      "#ef6c00"),
+    ("خطر/بحرانی",             ["خطر/بحرانی", "خطر / بحرانی", "خطر", "بحرانی", "اضطرار"],      "#c62828"),
+]
+OTHER_COLOR = "#78909c"
+EMPTY_COLOR = "#b0bec5"
+EMPTY_LABEL = "بدون وضعیت ثبت شده"
+OTHER_LABEL = "سایر"
+
+
+# ---------------------------------------------------------------------------
+# ابزارهای کمکی
+# ---------------------------------------------------------------------------
+def normalize_text(value) -> str:
+    """یکسان‌سازی حروف عربی/فارسی و حذف فاصله‌های اضافی."""
+    if value is None:
+        return ""
+    text = str(value)
+    text = text.replace("ي", "ی").replace("ك", "ک").replace("\u200c", " ").replace("\xa0", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def normalize_key(text):
+    return normalize_text(text).replace(" ", "")
+
+
+def categorize(status_value: str) -> str:
+    """تبدیل متن آزاد ستون وضعیت به یکی از دسته‌های نمودار."""
+    raw = normalize_text(status_value)
+    if raw == "" or raw in ("-", "—", "nan", "None"):
+        return EMPTY_LABEL
+    probe = raw.replace(" ", "")
+    for label, keywords, _color in STATUS_CATEGORIES:
+        for kw in keywords:
+            if normalize_key(kw) in probe:
+                return label
+    return OTHER_LABEL
+
+
+def point_order(code) -> int:
+    match = re.search(r"(\d+)", str(code))
+    return int(match.group(1)) if match else 999
+
+
+def prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """یکسان‌سازی نام ستون‌ها و مرتب‌سازی مقادیر."""
+    df = df.copy()
+    df.columns = [normalize_text(c) for c in df.columns]
+    df = df.rename(columns={k: v for k, v in COLUMN_ALIASES.items() if k in df.columns})
+
+    for col in COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+
+    df = df[COLUMNS]
+    df = df.dropna(how="all")
+
+    for col in COLUMNS:
+        df[col] = df[col].apply(lambda v: "" if pd.isna(v) else str(v).strip())
+
+    df = df[df["نام تجهیز"].apply(lambda v: v != "")]
+    df["_order"] = df["راهنمای نقاط"].apply(point_order)
+    df = df.sort_values(["خط تولید", "واحد", "نام تجهیز", "_order"], kind="mergesort")
+    df = df.drop(columns=["_order"]).reset_index(drop=True)
+    return df
+
+
+# ---------------------------------------------------------------------------
+# داده نمونه (تا زمان اتصال کامل به شیت)
+# ---------------------------------------------------------------------------
+def sample_data() -> pd.DataFrame:
+    rows = []
+
+    # --- فیدر آسیاب سنگ (۴ نقطه، بدون شماره بیرینگ) ---
+    for p in ["P1", "P2", "P3", "P4"]:
+        rows.append({
+            "نام تجهیز": "فیدر آسیاب سنگ", "خط تولید": "8", "واحد": "آسیاب سنگ",
+            "نوع تجهیز": "گیربکس", "راهنمای نقاط": p, "شماره بیرینگ": "",
+            "بوش": "", "دور نامی": "", "سیستم درایور": "کوپلینگ", "وضعیت": "",
+        })
+
+    # --- کراشر (۶ نقطه) ---
+    crusher = [
+        ("P1", "6234+NU234",        "",       "1000", "نرمال"),
+        ("P2", "6234",              "",       "1000", "نرمال"),
+        ("P3", "22236/K30/W33/C3",  "AOH3136", "1000", "نیازمند مراقبت و کنترل"),
+        ("P4", "22236/K30/W33/C3",  "AOH3136", "1000", "هشدار"),
+        ("P5", "24192E CA K30/W33", "AOH4192", "220",  "نرمال"),
+        ("P6", "24192E CA K30/W33", "AOH4192", "220",  ""),
+    ]
+    for p, brg, bush, rpm, stt in crusher:
+        rows.append({
+            "نام تجهیز": "کراشر", "خط تولید": "8", "واحد": "آسیاب سنگ",
+            "نوع تجهیز": "کراشر", "راهنمای نقاط": p, "شماره بیرینگ": brg,
+            "بوش": bush, "دور نامی": rpm, "سیستم درایور": "کوپلینگ", "وضعیت": stt,
+        })
+
+    # --- میل فن مواد ۸ (۴ نقطه) ---
+    mill_fan = [
+        ("P1", "22222",  "انتهای موتور",  "1000", "نرمال"),
+        ("P2", "6322",   "سر موتور",      "1000", "هشدار"),
+        ("P3", "22320",  "یاتاقان سمت کوره", "1000", "نیازمند مراقبت و کنترل"),
+        ("P4", "22320",  "سمت آزاد",      "1000", "نرمال"),
+    ]
+    for p, brg, pos, rpm, stt in mill_fan:
+        rows.append({
+            "نام تجهیز": "میل فن مواد ۸", "خط تولید": "8", "واحد": "آسیاب سنگ",
+            "نوع تجهیز": "فن", "راهنمای نقاط": p, "شماره بیرینگ": brg,
+            "بوش": "", "دور نامی": rpm, "سیستم درایور": "کوپلینگ", "وضعیت": stt,
+        })
+
+    return pd.DataFrame(rows, columns=COLUMNS)
+
+
+# ---------------------------------------------------------------------------
+# خواندن داده: فایل آپلودی > گوگل شیت > داده نمونه
+# ---------------------------------------------------------------------------
+def read_uploaded(file) -> pd.DataFrame:
+    if file.name.lower().endswith(".csv"):
+        try:
+            return pd.read_csv(file, encoding="utf-8-sig")
+        except UnicodeDecodeError:
+            file.seek(0)
+            return pd.read_csv(file, encoding="cp1256")
+    return pd.read_excel(file)
+
+
+def read_gsheet() -> pd.DataFrame:
+    import gspread
+    from google.oauth2.service_account import Credentials
+
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
+    ]
+    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
+    client = gspread.authorize(creds)
+    worksheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
+    records = worksheet.get_all_records()
+    if not records:
+        raise ValueError("شیت خالی است.")
+    return pd.DataFrame(records)
+
+
+@st.cache_data(show_spinner=False)
+def load_data(_uploaded=None, use_gsheet: bool = True) -> tuple:
+    if _uploaded is not None:
+        return prepare_dataframe(read_uploaded(_uploaded)), "فایل آپلودی"
+    if use_gsheet and SHEET_ID and os.path.exists(SERVICE_ACCOUNT_FILE):
+        try:
+            return prepare_dataframe(read_gsheet()), "گوگل شیت"
+        except Exception as exc:  # noqa: BLE001
+            st.warning(f"خواندن گوگل شیت ممکن نشد ({exc}). داده نمونه استفاده شد.")
+    return prepare_dataframe(sample_data()), "داده نمونه"
+
+
+# ---------------------------------------------------------------------------
+# نمودار دایره‌ای (SVG، بدون وابستگی اضافی و با پشتیبانی کامل فارسی)
+# ---------------------------------------------------------------------------
+def build_donut_svg(items, size: int = 340, radius: int = 82, thickness: int = 40) -> str:
+    """items: لیست (label, count, color)."""
+    total = sum(c for _, c, _ in items)
+    center = size / 2
+    circumference = 2 * math.pi * radius
+
+    circles = []
+    offset = 0.0
+    for _label, count, color in items:
+        frac = count / total if total else 0
+        dash = frac * circumference
+        gap = circumference - dash
+        circles.append(
+            f'<circle r="{radius}" fill="none" stroke="{color}" stroke-width="{thickness}" '
+            f'stroke-dasharray="{dash:.3f} {gap:.3f}" stroke-dashoffset="{-offset:.3f}" '
+            f'stroke-linecap="butt"/>'
+        )
+        offset += dash
+
+    svg = f"""
+    <svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" xmlns="http://www.w3.org/2000/svg">
+      <g transform="translate({center},{center}) rotate(-90)">
+        <circle r="{radius}" fill="none" stroke="#eceff1" stroke-width="{thickness}"/>
+        {''.join(circles)}
+      </g>
+      <text x="{center}" y="{center - 6}" text-anchor="middle"
+            font-size="14" fill="#607d8b" font-family="Tahoma, sans-serif">مجموع نقاط</text>
+      <text x="{center}" y="{center + 22}" text-anchor="middle"
+            font-size="24" fill="#263238" font-weight="bold" font-family="Tahoma, sans-serif">{total}</text>
+    </svg>
+    """
+    return svg
+
+
+def build_legend_html(items) -> str:
+    total = sum(c for _, c, _ in items)
+    rows = []
+    for label, count, color in items:
+        pct = (count / total * 100) if total else 0
+        rows.append(
+            f'<div style="display:flex;align-items:center;gap:10px;margin:6px 0;">'
+            f'<span style="width:16px;height:16px;border-radius:4px;background:{color};'
+            f'display:inline-block;flex:0 0 16px;"></span>'
+            f'<span style="flex:1;font-size:14px;color:#263238;">{label}</span>'
+            f'<span style="font-size:13px;color:#607d8b;">{count} نقطه</span>'
+            f'<span style="font-size:14px;font-weight:bold;color:#263238;min-width:56px;'
+            f'text-align:left;">{pct:.1f}%</span>'
+            f'</div>'
+        )
+    return "".join(rows)
+
+
+# ---------------------------------------------------------------------------
+# استایل
+# ---------------------------------------------------------------------------
 st.markdown(
     """
     <style>
-    .stApp { background: #f7f8fa; }
-    .main-title {
-        background: linear-gradient(90deg, #b8261c 0%, #e8582c 60%, #f0913d 100%);
-        color: #ffffff;
-        padding: 18px 24px;
-        border-radius: 12px;
-        box-shadow: 0 4px 14px rgba(0,0,0,.15);
-        margin-bottom: 6px;
+    .main .block-container { direction: rtl; text-align: right; padding-top: 1.2rem; }
+    .app-header {
+        background: linear-gradient(90deg, #0d47a1 0%, #1976d2 55%, #42a5f5 100%);
+        color: #fff; padding: 18px 24px; border-radius: 14px; margin-bottom: 18px;
+        box-shadow: 0 6px 18px rgba(13, 71, 161, .25);
     }
-    .main-title h1 { color:#fff; font-size: 22px; margin:0; }
-    .main-title p  { color:#ffe6dc; font-size: 12px; margin:6px 0 0 0; }
-    .card {
-        background:#ffffff;
-        border:1px solid #e6e8ec;
-        border-radius:10px;
-        padding:12px 14px;
-        margin-bottom:10px;
-        box-shadow:0 1px 3px rgba(0,0,0,.05);
+    .app-header h1 { margin: 0; font-size: 22px; }
+    .app-header p  { margin: 6px 0 0; font-size: 13px; opacity: .9; }
+    .info-card {
+        background: #f5f9ff; border: 1px solid #d6e4f7; border-radius: 12px;
+        padding: 12px 14px; margin-bottom: 10px;
     }
-    .card .pt  { font-weight:700; color:#b8261c; font-size:17px; }
-    .card .lbl { color:#8a8f98; font-size:11px; }
-    .card .val { color:#1f2328; font-size:14px; font-weight:600; }
-    .small-note { color:#8a8f98; font-size:12px; }
-    div[data-testid="stMetricValue"] { font-size: 20px; }
+    .info-card .lbl { font-size: 12px; color: #607d8b; }
+    .info-card .val { font-size: 15px; color: #0d47a1; font-weight: bold; margin-top: 4px; }
+    .legend-box {
+        background: #fff; border: 1px solid #e0e6ed; border-radius: 12px;
+        padding: 14px 18px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# ----------------------------------------------------------------------------
-# شِمای ستون‌های شیت تجهیزات (دقیقاً مطابق شیت شما)
-# ----------------------------------------------------------------------------
-COL_EQUIP = "نام تجهیز"
-COL_LINE = "خط تولید"
-COL_UNIT = "واحد"
-COL_TYPE = "نوع تجهیز"
-COL_POINT = "راهنمایی نقاط"
-COL_BEAR = "شماره بیرینگ"
-COL_BUSH = "بوش"
-COL_RPM = "دور نامی"
-COL_DRIVE = "سیستم درایور"
 
-EQUIP_SCHEMA = [
-    COL_EQUIP, COL_LINE, COL_UNIT, COL_TYPE,
-    COL_POINT, COL_BEAR, COL_BUSH, COL_RPM, COL_DRIVE,
-]
+# ---------------------------------------------------------------------------
+# ورود
+# ---------------------------------------------------------------------------
+if "user_email" not in st.session_state:
+    st.session_state.user_email = None
 
-# ستون‌های شیت اندازه‌گیری (در صورت وجود)
-M_EQUIP = "نام تجهیز"
-M_POINT = "نقطه"
-M_DATE = "تاریخ"
-M_VALUE = "مقدار"
-
-DASH = "—"          # نمایش خانه‌ی خالی
-ALL = "همه"         # گزینه‌ی بدون فیلتر
-
-
-# ----------------------------------------------------------------------------
-# ابزار یکسان‌سازی متن (کلید حل مشکل پیدا نشدن ستون‌ها)
-# ----------------------------------------------------------------------------
-_AR_MAP = {"ي": "ی", "ك": "ک", "ۀ": "ه", "ة": "ه", "أ": "ا", "إ": "ا", "آ": "ا"}
-
-
-def norm(text) -> str:
-    """یکسان‌سازی: حذف نیم‌فاصله/فاصله‌ی اضافه، تبدیل ی و ک عربی، یکسان‌سازی ارقام."""
-    if text is None:
-        return ""
-    s = str(text)
-    s = s.replace("\u200c", "").replace("\u200f", "").replace("\u200e", "")
-    for a, b in _AR_MAP.items():
-        s = s.replace(a, b)
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
-
-
-def norm_key(text) -> str:
-    """کلید مقایسه: بدون فاصله و بدون حساسیت به بزرگی/کوچکی حروف."""
-    return norm(text).replace(" ", "").casefold()
-
-
-def match_columns(df: pd.DataFrame, schema: list) -> dict:
-    """نگاشت نام ستون‌های واقعی شیت به شِمای استاندارد ما."""
-    lookup = {norm_key(c): c for c in df.columns}
-    mapping = {}
-    for want in schema:
-        hit = lookup.get(norm_key(want))
-        if hit is not None:
-            mapping[want] = hit
-    return mapping
-
-
-def apply_schema(df: pd.DataFrame, schema: list) -> tuple:
-    """جدول را به شِمای استاندارد تبدیل می‌کند و فهرست ستون‌های گم‌شده را برمی‌گرداند."""
-    mapping = match_columns(df, schema)
-    missing = [c for c in schema if c not in mapping]
-    out = pd.DataFrame()
-    for col in schema:
-        out[col] = df[mapping[col]] if col in mapping else pd.Series([""] * len(df))
-    for col in out.columns:
-        out[col] = out[col].apply(lambda v: "" if pd.isna(v) else norm(v))
-    return out, missing
-
-
-def show_val(v) -> str:
-    v = norm(v)
-    return v if v else DASH
-
-
-# ----------------------------------------------------------------------------
-# ورود کاربران
-# ----------------------------------------------------------------------------
-DEFAULT_USERS = {
-    "admin@tehrancement.ir":   {"password": "admin1234", "role": "مدیر", "name": "مدیر سیستم"},
-    "supervisor@tehrancement.ir": {"password": "sup1234", "role": "ناظر", "name": "ناظر ارتعاشات"},
-}
-
-
-def get_users() -> dict:
-    try:
-        users = dict(st.secrets.get("users", {}))
-        if users:
-            return users
-    except Exception:
-        pass
-    return DEFAULT_USERS
-
-
-# ----------------------------------------------------------------------------
-# منبع داده
-# ----------------------------------------------------------------------------
-def _open_worksheet(url: str, cred_json: dict):
-    import gspread
-    from google.oauth2.service_account import Credentials
-
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive",
-    ]
-    creds = Credentials.from_service_account_info(cred_json, scopes=scopes)
-    gc = gspread.authorize(creds)
-    return gc.open_by_url(url)
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def read_sheet(url: str, cred_json_str: str, worksheet_name: str = None) -> pd.DataFrame:
-    cred_json = json.loads(cred_json_str)
-    book = _open_worksheet(url, cred_json)
-    if worksheet_name:
-        ws = book.worksheet(worksheet_name)
-    else:
-        ws = book.sheet1
-    rows = ws.get_all_records()
-    return pd.DataFrame(rows)
-
-
-def load_data() -> tuple:
-    """برمی‌گرداند: (دیتافریم تجهیزات، دیتافریم اندازه‌گیری یا None، پیام وضعیت)."""
-    sb = st.sidebar
-    sb.markdown("### 🔗 منبع داده")
-    mode = sb.radio(
-        "نوع اتصال",
-        ["گوگل شیت (آنلاین)", "فایل CSV / Excel (آفلاین)"],
-        index=0,
-        help="برای حالت بدون اینترنت، فایل CSV یا Excel تجهیزات را بارگذاری کنید.",
-    )
-
-    if mode.startswith("گوگل"):
-        url = sb.text_input("لینک گوگل شیت تجهیزات", key="sheet_url")
-        sheet_name = sb.text_input("نام شیت (اختیاری)", key="sheet_name")
-        if not url:
-            return None, None, "لینک گوگل شیت را در نوار کناری وارد کنید."
-        try:
-            cred = dict(st.secrets["gcp_service_account"])
-        except Exception:
-            return None, None, "اطلاعات سرویس‌اکانت (gcp_service_account) در secrets تنظیم نشده است."
-        try:
-            df = read_sheet(url, json.dumps(cred, sort_keys=True), sheet_name or None)
-        except Exception as exc:
-            return None, None, f"خطا در خواندن شیت: {exc}"
-        return df, None, ""
-
-    up = sb.file_uploader("فایل تجهیزات (CSV یا Excel)", type=["csv", "xlsx", "xls"])
-    up_m = sb.file_uploader("فایل اندازه‌گیری‌ها (اختیاری)", type=["csv", "xlsx", "xls"])
-    if not up:
-        return None, None, "فایل تجهیزات را بارگذاری کنید."
-
-    try:
-        if up.name.lower().endswith(".csv"):
-            df = pd.read_csv(up, dtype=str).fillna("")
-        else:
-            df = pd.read_excel(up, dtype=str).fillna("")
-    except Exception as exc:
-        return None, None, f"خطا در خواندن فایل تجهیزات: {exc}"
-
-    df_m = None
-    if up_m is not None:
-        try:
-            if up_m.name.lower().endswith(".csv"):
-                df_m = pd.read_csv(up_m).fillna("")
-            else:
-                df_m = pd.read_excel(up_m).fillna("")
-        except Exception as exc:
-            st.warning(f"فایل اندازه‌گیری خوانده نشد: {exc}")
-
-    return df, df_m, ""
-
-
-# ----------------------------------------------------------------------------
-# فیلترهای زنجیره‌ای
-# ----------------------------------------------------------------------------
-def cascading_filters(df: pd.DataFrame) -> tuple:
-    """سه فیلتر واقعی و به‌هم‌پیوسته: خط تولید -> واحد -> نام تجهیز."""
-    st.markdown("#### 🔍 انتخاب تجهیز")
-
-    c1, c2, c3 = st.columns(3)
-
-    # مرحله ۱ — خط تولید
-    lines = sorted({norm(v) for v in df[COL_LINE] if norm(v)})
-    line = c1.selectbox("خط تولید", [ALL] + lines, index=0, key="f_line")
-
-    step1 = df if line == ALL else df[df[COL_LINE] == line]
-
-    # مرحله ۲ — واحد (فقط واحدهای همان خط)
-    units = sorted({norm(v) for v in step1[COL_UNIT] if norm(v)})
-    unit = c2.selectbox("واحد", [ALL] + units, index=0, key="f_unit")
-
-    step2 = step1 if unit == ALL else step1[step1[COL_UNIT] == unit]
-
-    # مرحله ۳ — نام تجهیز (فقط تجهیزات همان خط و همان واحد)
-    equips = sorted({norm(v) for v in step2[COL_EQUIP] if norm(v)})
-    if not equips:
-        c3.selectbox("نام تجهیز", ["—"], key="f_equip_empty", disabled=True)
-        st.info("برای این ترکیب خط و واحد، تجهیزی در شیت ثبت نشده است.")
-        return None, None, None, None
-
-    equip = c3.selectbox("نام تجهیز", equips, index=0, key="f_equip")
-
-    sel = step2[step2[COL_EQUIP] == equip]
-    return line, unit, equip, sel
-
-
-# ----------------------------------------------------------------------------
-# کارت‌های نقاط
-# ----------------------------------------------------------------------------
-def point_cards(sel: pd.DataFrame):
-    rows = sel.to_dict("records")
-    st.markdown(f"### 🧭 شناسنامه نقاط — {norm(rows[0][COL_EQUIP])}")
-
-    meta = []
-    line = norm(rows[0][COL_LINE])
-    unit = norm(rows[0][COL_UNIT])
-    typ = norm(rows[0][COL_TYPE])
-    rpm = norm(rows[0][COL_RPM])
-    if line:
-        meta.append(f"خط تولید: {line}")
-    if unit:
-        meta.append(f"واحد: {unit}")
-    if typ:
-        meta.append(f"نوع تجهیز: {typ}")
-    if rpm:
-        meta.append(f"دور نامی: {rpm}")
-    if meta:
-        st.markdown(
-            f"<div class='small-note'>{'  |  '.join(meta)}</div>", unsafe_allow_html=True
-        )
-
-    cols = st.columns(max(1, min(4, len(rows))))
-    for i, r in enumerate(rows):
-        with cols[i % len(cols)]:
-            st.markdown(
-                f"""
-                <div class='card'>
-                    <div class='pt'>{show_val(r[COL_POINT])}</div>
-                    <div class='lbl'>شماره بیرینگ</div>
-                    <div class='val'>{show_val(r[COL_BEAR])}</div>
-                    <div class='lbl' style='margin-top:6px;'>بوش</div>
-                    <div class='val'>{show_val(r[COL_BUSH])}</div>
-                    <div class='lbl' style='margin-top:6px;'>سیستم درایور</div>
-                    <div class='val'>{show_val(r[COL_DRIVE])}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-
-# ----------------------------------------------------------------------------
-# نمودارها (در صورت وجود داده اندازه‌گیری)
-# ----------------------------------------------------------------------------
-def charts(df_m: pd.DataFrame, equip: str, sel: pd.DataFrame):
-    st.markdown("### 📈 روند ارتعاشات")
-
-    if df_m is None or df_m.empty:
-        st.info(
-            "برای رسم نمودار، فایل اندازه‌گیری‌ها را بارگذاری کنید "
-            f"(ستون‌های مورد نیاز: «{M_EQUIP}»، «{M_POINT}»، «{M_DATE}»، «{M_VALUE}»)."
-        )
-        return
-
-    m = match_columns(
-        df_m, [M_EQUIP, M_POINT, M_DATE, M_VALUE,
-               "ارتعاش کل", "Velocity RMS", "Acceleration", "Vibration"]
-    )
-    if M_EQUIP not in m or M_POINT not in m:
-        st.warning("ستون «نام تجهیز» یا «نقطه» در فایل اندازه‌گیری پیدا نشد.")
-        return
-
-    value_col = m.get(M_VALUE) or m.get("ارتعاش کل") or m.get("Velocity RMS") or m.get("Vibration")
-
-    work = df_m.copy()
-    work["_equip"] = work[m[M_EQUIP]].apply(norm)
-    work = work[work["_equip"] == equip]
-    if work.empty:
-        st.info("برای این تجهیز دادهای در فایل اندازه‌گیری ثبت نشده است.")
-        return
-
-    work["_point"] = work[m[M_POINT]].apply(norm)
-    if M_DATE in m:
-        work["_date"] = pd.to_datetime(work[m[M_DATE]], errors="coerce")
-    else:
-        work["_date"] = pd.RangeIndex(len(work))
-
-    # آستانه‌ی هشدار (ISO 10816 عام، قابل تغییر)
-    thr = st.slider("آستانه هشدار ارتعاش", 1.0, 20.0, 4.5, 0.5, key="thr")
-
-    points = sorted({p for p in work["_point"] if p})
-    for p in points:
-        sub = work[work["_point"] == p].sort_values("_date")
-        st.markdown(f"**نقطه {p}**")
-        if value_col:
-            y = pd.to_numeric(sub[value_col], errors="coerce")
-            chart_df = pd.DataFrame({"تاریخ": sub["_date"].values, "مقدار": y.values}).dropna()
-            if chart_df.empty:
-                st.caption("داده‌ی عددی معتبری برای این نقطه وجود ندارد.")
-                continue
-            chart_df = chart_df.set_index("تاریخ")
-            st.line_chart(chart_df, height=230)
-            last = float(chart_df["مقدار"].iloc[-1])
-            c1, c2 = st.columns(2)
-            c1.metric("آخرین مقدار", f"{last:.2f}")
-            if last >= thr:
-                c2.error("وضعیت: نیازمند بررسی ⚠️")
-            else:
-                c2.success("وضعیت: نرمال ✅")
-        else:
-            st.caption("ستون مقدار ارتعاش در فایل پیدا نشد.")
-
-
-# ----------------------------------------------------------------------------
-# جریان اصلی
-# ----------------------------------------------------------------------------
-def login_gate() -> dict:
-    if "user" in st.session_state:
-        return st.session_state["user"]
-
+if st.session_state.user_email is None:
     st.markdown(
-        "<div class='main-title'><h1>سیستم هوشمند پایش وضعیت - سیمان تهران</h1>"
+        '<div class="app-header"><h1>سیستم هوشمند پایش وضعیت - سیمان تهران</h1>'
         "<p>ورود به سامانه</p></div>",
         unsafe_allow_html=True,
     )
     with st.form("login"):
         email = st.text_input("ایمیل سازمانی")
-        pwd = st.text_input("رمز عبور", type="password")
-        ok = st.form_submit_button("ورود")
-    if ok:
-        users = get_users()
-        rec = users.get(email.strip().lower())
-        if rec and str(rec.get("password")) == pwd:
-            st.session_state["user"] = {
-                "email": email.strip().lower(),
-                "role": rec.get("role", "ناظر"),
-                "name": rec.get("name", email),
-            }
+        password = st.text_input("رمز عبور", type="password")
+        submitted = st.form_submit_button("ورود")
+    if submitted:
+        key = email.strip().lower()
+        if key in {k.lower(): k for k in USERS}.keys() and password == PASSWORD:
+            st.session_state.user_email = key
             st.rerun()
         else:
-            st.error("ایمیل یا رمز عبور نادرست است.")
+            st.error("ایمیل یا رمز عبور درست نیست.")
     st.stop()
 
+current_email = st.session_state.user_email
+user_info = USERS.get(current_email, {"name": current_email, "role": "کاربر"})
+role = user_info["role"]
 
-def main():
-    user = login_gate()
+# ---------------------------------------------------------------------------
+# هدر
+# ---------------------------------------------------------------------------
+st.markdown(
+    f'<div class="app-header"><h1>سیستم هوشمند پایش وضعیت - سیمان تهران</h1>'
+    f"<p>{user_info['name']} — {role}</p></div>",
+    unsafe_allow_html=True,
+)
 
-    df_raw, df_m, msg = load_data()
-
-    # نوار کناری: هویت کاربر
-    st.sidebar.markdown("---")
-    st.sidebar.markdown(f"**{user['name']}**")
-    st.sidebar.caption(f"{user['role']} • {user['email']}")
-    if st.sidebar.button("خروج"):
-        st.session_state.pop("user", None)
+with st.sidebar:
+    st.markdown(f"**{user_info['name']}**")
+    st.caption(role)
+    uploaded = st.file_uploader("فایل شیت (csv / xlsx)", type=["csv", "xlsx", "xls"])
+    use_gsheet = st.checkbox("خواندن از گوگل شیت", value=bool(SHEET_ID))
+    if st.button("خروج"):
+        st.session_state.user_email = None
         st.rerun()
 
-    # عنوان
-    last_rec = "—"
-    if df_m is not None and not df_m.empty:
-        m = match_columns(df_m, [M_DATE])
-        if M_DATE in m:
-            d = pd.to_datetime(df_m[m[M_DATE]], errors="coerce").max()
-            if pd.notna(d):
-                last_rec = d.strftime("%Y-%m-%d")
-    n_data = 0 if df_m is None else len(df_m)
-    st.markdown(
-        f"""
-        <div class='main-title'>
-            <h1>سیستم هوشمند پایش وضعیت - سیمان تهران</h1>
-            <p>آخرین رکورد: {last_rec} &nbsp;|&nbsp; تعداد داده: {n_data}</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+df, source = load_data(uploaded, use_gsheet)
 
-    if msg:
-        st.warning(msg)
+# ---------------------------------------------------------------------------
+# تب‌ها
+# ---------------------------------------------------------------------------
+if role == "مدیر ارشد":
+    tabs = st.tabs(["داشبورد", "ارسال اعلان", "مدیریت کاربران"])
+elif role == "مدیر":
+    tabs = st.tabs(["داشبورد", "ارسال اعلان"])
+else:
+    tabs = st.tabs(["داشبورد"])
+
+dashboard = tabs[0]
+
+# ---------------------------------------------------------------------------
+# داشبورد
+# ---------------------------------------------------------------------------
+with dashboard:
+    st.caption(f"منبع داده: {source} — تعداد ردیف‌ها: {len(df)}")
+
+    if df.empty:
+        st.warning("داده‌ای برای نمایش وجود ندارد.")
         st.stop()
 
-    if df_raw is None or df_raw.empty:
-        st.error("شیت تجهیزات خالی است یا خوانده نشد.")
-        st.stop()
-
-    # تبدیل به شِمای استاندارد
-    df, missing = apply_schema(df_raw, EQUIP_SCHEMA)
-    if missing:
-        st.error(
-            "این ستون‌ها در شیت پیدا نشد: " + "، ".join(missing)
-            + "\n\nنام ستون‌ها در ردیف اول شیت باید دقیقاً یکی از این موارد باشد: "
-            + "، ".join(EQUIP_SCHEMA)
-        )
-        st.stop()
-
-    df = df[df[COL_EQUIP] != ""].reset_index(drop=True)
-
-    line, unit, equip, sel = cascading_filters(df)
-    if sel is None:
-        st.stop()
-
-    # تعداد نقاط — فقط برای همین تجهیز
+    lines = sorted(df["خط تولید"].unique(), key=lambda v: (len(str(v)), str(v)))
     c1, c2, c3 = st.columns(3)
-    c1.metric("تعداد نقاط این تجهیز", len(sel))
-    c2.metric("خط تولید", line if line else ALL)
-    c3.metric("واحد", unit if unit else ALL)
 
-    point_cards(sel)
-    charts(df_m, equip, sel)
+    with c1:
+        line = st.selectbox("خط تولید", lines)
+    units = sorted(df.loc[df["خط تولید"] == line, "واحد"].unique())
+    with c2:
+        unit = st.selectbox("واحد", units if units else ["-"])
+    equipments = sorted(df.loc[(df["خط تولید"] == line) & (df["واحد"] == unit), "نام تجهیز"].unique())
+    with c3:
+        equipment = st.selectbox("تجهیز", equipments if equipments else ["-"])
 
-    st.markdown(
-        "<hr style='border:none;border-top:1px solid #e6e8ec;'>"
-        "<div class='small-note'>سیستم هوشمند پایش وضعیت — سیمان تهران</div>",
-        unsafe_allow_html=True,
+    equipment_df = df[(df["خط تولید"] == line) & (df["واحد"] == unit) & (df["نام تجهیز"] == equipment)]
+    equipment_df = equipment_df.sort_values(
+        by="راهنمای نقاط", key=lambda s: s.apply(point_order), kind="mergesort"
     )
 
+    unit_df = df[(df["خط تولید"] == line) & (df["واحد"] == unit)]
 
-if __name__ == "__main__":
-    main()
+    if equipment_df.empty:
+        st.info("برای انتخاب‌های بالا تجهیزی یافت نشد.")
+    else:
+        first = equipment_df.iloc[0]
+        st.markdown(f"#### {equipment}")
+        m1, m2, m3, m4 = st.columns(4)
+        for col, label, value in (
+            (m1, "نوع تجهیز", first["نوع تجهیز"]),
+            (m2, "دور نامی (rpm)", first["دور نامی"]),
+            (m3, "سیستم درایور", first["سیستم درایور"]),
+            (m4, "تعداد نقاط", str(len(equipment_df))),
+        ):
+            with col:
+                shown = value if str(value).strip() != "" else "—"
+                st.markdown(
+                    f'<div class="info-card"><div class="lbl">{label}</div>'
+                    f'<div class="val">{shown}</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+        table = equipment_df[["راهنمای نقاط", "شماره بیرینگ", "بوش", "دور نامی", "سیستم درایور", "وضعیت"]].copy()
+        table = table.rename(columns={"راهنمای نقاط": "کد نقطه"})
+        table["شماره بیرینگ"] = table["شماره بیرینگ"].apply(
+            lambda v: v if str(v).strip() != "" else "—"
+        )
+        table["بوش"] = table["بوش"].apply(lambda v: v if str(v).strip() != "" else "—")
+
+        def color_status(val):
+            cat = categorize(val)
+            palette = {label: color for label, _k, color in STATUS_CATEGORIES}
+            if cat in palette:
+                return f"background-color:{palette[cat]}22; color:{palette[cat]}; font-weight:600;"
+            if cat == EMPTY_LABEL:
+                return "color:#90a4ae; font-style:italic;"
+            return "color:#455a64; font-weight:600;"
+
+        try:
+            styles = table.style.map(color_status, subset=["وضعیت"])
+        except AttributeError:
+            styles = table.style.applymap(color_status, subset=["وضعیت"])
+
+        st.dataframe(styles, use_container_width=True, hide_index=True)
+        st.caption("متن ستون وضعیت عیناً از شیت خوانده می‌شود و هیچ محاسبه‌ای روی آن انجام نمی‌شود.")
+
+    # -----------------------------------------------------------------
+    # نمودار دایره‌ای انتهای صفحه
+    # -----------------------------------------------------------------
+    st.divider()
+    st.markdown("### سهم درصدی وضعیت نقاط")
+
+    scope = st.radio(
+        "دامنه نمودار",
+        ["تجهیز انتخاب‌شده", "کل واحد انتخاب‌شده", "کل شیت"],
+        horizontal=True,
+        index=0,
+    )
+    if scope == "تجهیز انتخاب‌شده":
+        scope_df = equipment_df
+    elif scope == "کل واحد انتخاب‌شده":
+        scope_df = unit_df
+    else:
+        scope_df = df
+
+    if scope_df.empty:
+        st.info("داده‌ای برای رسم نمودار نیست.")
+    else:
+        cats = scope_df["وضعیت"].apply(categorize)
+        items = []
+        order_labels = [label for label, _k, _c in STATUS_CATEGORIES] + [OTHER_LABEL, EMPTY_LABEL]
+        color_map = {label: color for label, _k, color in STATUS_CATEGORIES}
+        color_map[OTHER_LABEL] = OTHER_COLOR
+        color_map[EMPTY_LABEL] = EMPTY_COLOR
+
+        for label in order_labels:
+            count = int((cats == label).sum())
+            if count > 0:
+                items.append((label, count, color_map[label]))
+
+        left, right = st.columns([1, 1])
+        with left:
+            st.markdown(build_donut_svg(items), unsafe_allow_html=True)
+        with right:
+            st.markdown(
+                f'<div class="legend-box">{build_legend_html(items)}</div>',
+                unsafe_allow_html=True,
+            )
+
+# ---------------------------------------------------------------------------
+# تب ارسال اعلان (مدیر و مدیر ارشد)
+# ---------------------------------------------------------------------------
+if role in ("مدیر", "مدیر ارشد"):
+    with tabs[1]:
+        st.subheader("ارسال اعلان ایمیلی")
+        with st.form("notify"):
+            recipients = st.multiselect(
+                "گیرندگان", options=list(USERS.keys()),
+                format_func=lambda e: f"{USERS[e]['name']} — {e}",
+            )
+            subject = st.text_input("موضوع", value="اعلان پایش وضعیت - سیمان تهران")
+            body = st.text_area("متن اعلان", height=160)
+            send = st.form_submit_button("ارسال")
+        if send:
+            if not recipients:
+                st.error("حداقل یک گیرنده انتخاب کنید.")
+            else:
+                try:
+                    host = st.secrets.get("SMTP_HOST", "smtp.gmail.com")
+                    port = int(st.secrets.get("SMTP_PORT", 587))
+                    sender = st.secrets.get("SMTP_USER", "tehrancment@gmail.com")
+                    app_pass = st.secrets.get("SMTP_PASS", "")
+
+                    if not app_pass:
+                        raise RuntimeError("رمز اپلیکیشن در secrets تنظیم نشده است.")
+
+                    msg = MIMEMultipart()
+                    msg["From"] = sender
+                    msg["To"] = ", ".join(recipients)
+                    msg["Subject"] = subject
+                    msg.attach(MIMEText(body, "plain", "utf-8"))
+
+                    with smtplib.SMTP(host, port) as server:
+                        server.starttls()
+                        server.login(sender, app_pass)
+                        server.sendmail(sender, recipients, msg.as_string())
+
+                    st.success("اعلان ارسال شد.")
+                except Exception as exc:  # noqa: BLE001
+                    st.warning(f"ارسال واقعی انجام نشد ({exc}). پیش‌نمایش متن اعلان:")
+                    st.code(f"به: {', '.join(recipients)}\nموضوع: {subject}\n\n{body}")
+
+# ---------------------------------------------------------------------------
+# تب مدیریت کاربران (فقط مدیر ارشد)
+# ---------------------------------------------------------------------------
+if role == "مدیر ارشد":
+    with tabs[2]:
+        st.subheader("مدیریت کاربران")
+        users_df = pd.DataFrame(
+            [{"ایمیل": e, "نام": v["name"], "نقش": v["role"]} for e, v in USERS.items()]
+        )
+        st.dataframe(users_df, use_container_width=True, hide_index=True)
+        st.caption("فهرست کاربران در دیکشنری USERS بالای فایل تعریف شده است.")
