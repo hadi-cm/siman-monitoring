@@ -1,15 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 سامانه هوشمند پایش وضعیت ارتعاشات — سیمان تهران
-نسخه یکپارچه (کد دیشب + موارد امشب):
-  1) اتصال به شیت‌های ارتعاشات، Assets و اعلانیه‌ها (Announcements)
-  2) فیلترهای پیشرفته و روان با نرمال‌سازی کامل
+نسخه یکپارچه (کد دیشب + موارد امشب + شماره‌گذاری خودکار نقاط):
+  1) اتصال به شیت‌های ارتعاشات، Assets و اعلانیه‌ها
+  2) فیلترهای پیشرفته با نرمال‌سازی کامل
   3) قرارداد نقاط پایش (Points Mapping) بر اساس «نوع تجهیز» + «درایور»
-  4) کارت مشخصات تجهیز و راهنمای نقاط
-  5) نمایش جدول مشخصات بیرینگ و تجهیز
-  6) سیستم اعلانیه‌های هوشمند بر اساس تاریخ و وضعیت
-  7) مدیریت کاربران و سیستم ارسال ایمیل (SMTP و Mailto)
-  8) گزارش‌گیری HTML قابل چاپ و خروجی CSV
+  4) شماره‌گذاری خودکار و شرح‌دهی خودکار نقاط (P1, P2, ...) در جدول
+  5) کارت مشخصات تجهیز و راهنمای نقاط
+  6) اعلانیه‌ها، کاربران، ایمیل، گزارش HTML و CSV
 """
 
 import os
@@ -26,7 +24,7 @@ import requests
 import streamlit as st
 
 # ============================================================
-# ۰) تنظیمات صفحه (اولین دستور Streamlit)
+# ۰) تنظیمات صفحه
 # ============================================================
 st.set_page_config(
     page_title="سامانه هوشمند پایش وضعیت — سیمان تهران",
@@ -46,15 +44,13 @@ SHEET_VIB = _secret("SHEET_VIB", "ارتعاشات")
 SHEET_ASSETS = _secret("SHEET_ASSETS", "Assets")
 SHEET_ANN = _secret("SHEET_ANN", "اعلانیه ها")
 
-# ---------- حدود هشدار ----------
 WARN_LIMIT = 4.5   # mm/s
 CRIT_LIMIT = 7.0   # mm/s
 
 EMPTY_TOKENS = {"", "-", "—", "_", "na", "n/a", "null", "none", "nan", "بی‌داده"}
 
 # ============================================================
-# ۰-ب) قرارداد نقاط پایش (Points Mapping Contract)
-#     کلیدها = دقیقاً همان عناوینی که در شیت Assets می‌نویسی
+# ۰-ب) قرارداد نقاط پایش
 # ============================================================
 FAN_COUPLING = {
     "P1": "انتهای موتور (NDE)",
@@ -144,12 +140,11 @@ EQUIPMENT_MAPPING = {
 
 POINT_LABELS = {}
 
-# ---------- ستون‌ها ----------
 VIEW_COLS = ["تاریخ", "خط تولید", "واحد", "تجهیز", "نقطه", "شرح نقطه",
              "شماره بیرینگ", "افقی", "عمودی", "محوری", "حداکثر", "وضعیت", "دما"]
 
-REPORT_COLS = ["تاریخ", "خط تولید", "واحد", "تجهیز", "نقطه", "شماره بیرینگ",
-               "افقی", "عمودی", "محوری", "حداکثر", "وضعیت"]
+REPORT_COLS = ["تاریخ", "خط تولید", "واحد", "تجهیز", "نقطه", "شرح نقطه",
+               "شماره بیرینگ", "افقی", "عمودی", "محوری", "حداکثر", "وضعیت"]
 
 NUM_COLS = ["افقی", "عمودی", "محوری", "حداکثر", "دما"]
 
@@ -338,7 +333,6 @@ def safe_name(s):
 
 # ---------- منطق قرارداد نقاط ----------
 def _match_mapping_key(value):
-    """با حفظ عنوان اصلی، کلید متناظر در قرارداد را پیدا می‌کند."""
     nv = norm(value)
     if not nv:
         return None
@@ -360,7 +354,6 @@ def _driver_key(driver):
     return "default"
 
 def get_mapping(asset_type, driver):
-    """خروجی: دیکشنری نقطه -> شرح، بر اساس نوع تجهیز و درایور."""
     key = _match_mapping_key(asset_type)
     if not key:
         return {}
@@ -493,11 +486,10 @@ def load_sheet(sheet_name):
 # ۴) ساخت داده‌ها
 # ============================================================
 def build_assets(df):
-    """خروجی: (دیکشنری نقطه‌ها، دیکشنری مشخصات هر تجهیز)"""
     if df is None or df.empty:
         return {}, {}
     m = resolve_columns(df, ASSET_COLUMNS)
-    if "equip" not in m or "point" not in m:
+    if "equip" not in m:
         return {}, {}
 
     equip_s = list(col_or_blank(df, m, "equip"))
@@ -565,6 +557,7 @@ def lookup_asset(assets, equip, code):
     return assets.get((ekey, code))
 
 def build_vib(df, assets, asset_meta):
+    """ساخت جدول نهایی + شماره‌گذاری و شرح‌دهی خودکار نقاط."""
     if df is None or df.empty:
         return pd.DataFrame()
 
@@ -583,39 +576,71 @@ def build_vib(df, assets, asset_meta):
 
     rows = []
     for i in range(len(df)):
-        info = lookup_asset(assets, equip_s[i], pts[i]) or {}
-        meta = asset_meta.get(norm(equip_s[i]), {})
-
-        bearing = info.get("bearing") or brg_sheet[i]
-        h, v, a = h_s[i], v_s[i], a_s[i]
-        stt = status_of(h, v, a)
-
-        # ---------- تکمیل اتوماتیک شرح نقطه از قرارداد ----------
-        desc = descs[i]
-        if not desc:
-            contract = get_mapping(meta.get("type", ""), meta.get("driver", ""))
-            desc = contract.get(pts[i], "")
-        if not desc:
-            desc = point_label(pts[i])
-
         rows.append({
+            "_rowid": i,
             "تاریخ": fmt_date(dates[i]),
             "_ord": date_key(dates[i]),
             "خط تولید": line_s[i],
             "واحد": unit_s[i],
             "تجهیز": equip_s[i],
             "نقطه": pts[i],
-            "شرح نقطه": desc,
-            "شماره بیرینگ": bearing,
-            "افقی": h,
-            "عمودی": v,
-            "محوری": a,
-            "حداکثر": row_max(h, v, a),
-            "وضعیت": "%s %s" % (STATUS_ICON.get(stt, "⚪"), stt),
+            "شرح نقطه": descs[i],
+            "_brg_sheet": brg_sheet[i],
+            "افقی": h_s[i],
+            "عمودی": v_s[i],
+            "محوری": a_s[i],
             "دما": t_s[i],
         })
 
-    out = pd.DataFrame(rows)
+    raw = pd.DataFrame(rows)
+    if raw.empty:
+        return raw
+
+    # ---------- شماره‌گذاری خودکار نقاط به تفکیک تجهیز و تاریخ ----------
+    final_rows = []
+    for (equip_name, date_str), group in raw.groupby(["تجهیز", "تاریخ"], sort=False):
+        group = group.sort_values("_rowid")
+        meta = asset_meta.get(norm(equip_name), {})
+        contract = get_mapping(meta.get("type", ""), meta.get("driver", ""))
+
+        have_pts = group["نقطه"].astype(str).str.strip().ne("").sum()
+        counter = 1 if have_pts == 0 else None
+
+        for _, row in group.iterrows():
+            pt = row["نقطه"]
+            desc = row["شرح نقطه"]
+
+            if not pt:
+                pt = "P%d" % counter
+                counter += 1
+
+            if not desc:
+                desc = contract.get(pt, "")
+            if not desc:
+                desc = point_label(pt)
+
+            info = lookup_asset(assets, equip_name, pt) or {}
+            bearing = info.get("bearing") or row["_brg_sheet"]
+
+            stt = status_of(row["افقی"], row["عمودی"], row["محوری"])
+            final_rows.append({
+                "تاریخ": row["تاریخ"],
+                "_ord": row["_ord"],
+                "خط تولید": row["خط تولید"],
+                "واحد": row["واحد"],
+                "تجهیز": row["تجهیز"],
+                "نقطه": pt,
+                "شرح نقطه": desc,
+                "شماره بیرینگ": bearing,
+                "افقی": row["افقی"],
+                "عمودی": row["عمودی"],
+                "محوری": row["محوری"],
+                "حداکثر": row_max(row["افقی"], row["عمودی"], row["محوری"]),
+                "وضعیت": "%s %s" % (STATUS_ICON.get(stt, "⚪"), stt),
+                "دما": row["دما"],
+            })
+
+    out = pd.DataFrame(final_rows)
     if out.empty:
         return out
 
@@ -894,16 +919,15 @@ else:
 
 critical = show[show["وضعیت"].astype(str).str.contains("بحرانی")] if len(show) else show
 warning = show[show["وضعیت"].astype(str).str.contains("هشدار")] if len(show) else show
-n_alerts = len(critical) + len(warning)
 
 s1, s2, s3, s4 = st.columns(4)
-s1.metric("ردیف‌های نمایش‌داده‌شده", f"{len(show):,}")
-s2.metric("تعداد تاریخ‌ها", f"{len(_dates_in_show)}")
-s3.metric("🔴 بحرانی", f"{len(critical)}")
-s4.metric("🟡 هشدار", f"{len(warning)}")
+s1.metric("ردیف‌های نمایش‌داده‌شده", "{:,}".format(len(show)))
+s2.metric("تعداد تاریخ‌ها", "{}".format(len(_dates_in_show)))
+s3.metric("🔴 بحرانی", "{}".format(len(critical)))
+s4.metric("🟡 هشدار", "{}".format(len(warning)))
 
 # ============================================================
-# ۹-ب) کارت مشخصات تجهیز و راهنمای نقاط (موارد امشب)
+# ۹-ب) کارت مشخصات تجهیز و راهنمای نقاط
 # ============================================================
 if len(sel_eq) == 1:
     eq_key = norm(sel_eq[0])
@@ -911,7 +935,7 @@ if len(sel_eq) == 1:
     mapping = get_mapping(meta.get("type", ""), meta.get("driver", ""))
 
     with st.container(border=True):
-        st.markdown("### 🛠 مشخصات تجهیز: %s" % sel_eq[0])
+        st.markdown("### 🛠 مشخصات تجهیز: {}".format(sel_eq[0]))
 
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("نوع تجهیز", meta.get("type") or "—")
@@ -930,14 +954,11 @@ if len(sel_eq) == 1:
             )
             st.dataframe(guide_df, use_container_width=True, hide_index=True)
         else:
-            st.info(
-                "برای این تجهیز، «نوع تجهیز» یا «درایور» در شیت Assets پیدا/تطبیق داده نشد؛ "
-                "شرح نقاط از شیت ارتعاشات خوانده می‌شود."
-            )
+            st.info("برای این تجهیز، «نوع تجهیز» یا «درایور» در شیت Assets تطبیق داده نشد؛ شرح نقاط از شیت ارتعاشات خوانده می‌شود.")
 elif len(sel_eq) > 1:
     st.caption("برای دیدن کارت مشخصات و راهنمای نقاط، فقط یک تجهیز را انتخاب کن.")
 
-# ---------- اعلانیه‌ها از شیت Announcements ----------
+# ---------- اعلانیه‌ها ----------
 with st.expander("🔔 اعلانیه‌ها و اطلاعیه‌ها", expanded=False):
     if not ann_raw.empty:
         m_ann = resolve_columns(ann_raw, ANN_COLUMNS)
@@ -956,9 +977,9 @@ with st.expander("🔔 اعلانیه‌ها و اطلاعیه‌ها", expanded
                 t_type = str(types[i]).strip()
 
                 if "خطر" in t_type or "بحرانی" in t_type:
-                    st.error(f"**{t_title}**\n\n{t_text}")
+                    st.error("**{}**\n\n{}".format(t_title, t_text))
                 else:
-                    st.warning(f"**{t_title}**\n\n{t_text}")
+                    st.warning("**{}**\n\n{}".format(t_title, t_text))
         if not has_ann:
             st.info("هیچ اطلاعیه فعالی ثبت نشده است.")
     else:
@@ -972,8 +993,8 @@ tab_table, tab_chart, tab_alert, tab_users = st.tabs(
 )
 
 with tab_table:
-    st.subheader("داده‌های ارتعاش — %s" % equip)
-    st.caption("بازه: %s" % caption_dates)
+    st.subheader("داده‌های ارتعاش — {}".format(equip))
+    st.caption("بازه: {}".format(caption_dates))
 
     f1, f2 = st.columns([1, 1])
     with f1:
@@ -996,13 +1017,13 @@ with tab_table:
     with dc1:
         csv = tbl[VIEW_COLS].to_csv(index=False).encode("utf-8-sig")
         st.download_button("⬇️ دانلود CSV", data=csv,
-                           file_name="vibration_%s.csv" % safe_name(equip),
+                           file_name="vibration_{}.csv".format(safe_name(equip)),
                            mime="text/csv", use_container_width=True)
     with dc2:
         html_report = build_report_html(tbl, equip, caption_dates)
         st.download_button("🖨️ دانلود گزارش HTML (قابل چاپ)",
                            data=html_report.encode("utf-8"),
-                           file_name="report_%s.html" % safe_name(equip),
+                           file_name="report_{}.html".format(safe_name(equip)),
                            mime="text/html", use_container_width=True)
 
 with tab_chart:
@@ -1035,15 +1056,15 @@ with tab_alert:
     if crit_rows.empty:
         st.success("در بازه انتخاب‌شده ردیف بحرانی یا هشدار وجود ندارد.")
     else:
-        lines = ["گزارش پایش ارتعاشات — %s" % equip, "بازه: %s" % caption_dates, ""]
+        lines = ["گزارش پایش ارتعاشات — {}".format(equip), "بازه: {}".format(caption_dates), ""]
         for _, r in crit_rows.iterrows():
             lines.append(
-                "%s | %s %s | نقطه %s | بیرینگ %s | افقی %s / عمودی %s / محوری %s | %s"
-                % (
+                "{} | {} {} | نقطه {} - {} | بیرینگ {} | افقی {} / عمودی {} / محوری {} | {}".format(
                     r.get("تاریخ", ""),
                     r.get("خط تولید", ""),
                     r.get("تجهیز", ""),
                     r.get("نقطه", ""),
+                    r.get("شرح نقطه", ""),
                     r.get("شماره بیرینگ", "") or "—",
                     "%.1f" % r["افقی"] if pd.notna(r.get("افقی")) else "—",
                     "%.1f" % r["عمودی"] if pd.notna(r.get("عمودی")) else "—",
@@ -1055,7 +1076,7 @@ with tab_alert:
         edited = st.text_area("متن آماده ارسال (قابل ویرایش)", draft, height=260)
 
         users = st.session_state["users"]
-        email_map = {("%s — %s" % (v.get("name") or k, v.get("email", ""))): v.get("email", "")
+        email_map = {("{} — {}".format(v.get("name") or k, v.get("email", ""))): v.get("email", "")
                      for k, v in users.items() if v.get("email")}
 
         picked = st.multiselect("گیرندگان از میان کاربران", list(email_map.keys()),
@@ -1068,7 +1089,7 @@ with tab_alert:
                 to_list.append(part.strip())
         to_list = list(dict.fromkeys(to_list))
 
-        subject = "هشدار ارتعاش — %s — %s" % (equip, caption_dates)
+        subject = "هشدار ارتعاش — {} — {}".format(equip, caption_dates)
 
         b1, b2 = st.columns(2)
         with b1:
@@ -1080,10 +1101,10 @@ with tab_alert:
                     (st.success if ok else st.warning)(msg)
         with b2:
             import urllib.parse as up
-            mailto = "mailto:%s?subject=%s&body=%s" % (
+            mailto = "mailto:{}?subject={}&body={}".format(
                 ",".join(to_list), up.quote(subject), up.quote(edited)
             )
-            st.markdown("[📨 باز کردن برنامه ایمیل](%s)" % mailto)
+            st.markdown("[📨 باز کردن برنامه ایمیل]({})".format(mailto))
 
 with tab_users:
     st.subheader("مدیریت کاربران")
