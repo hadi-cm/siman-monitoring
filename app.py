@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 سامانه هوشمند پایش وضعیت ارتعاشات — سیمان تهران
-نسخه اصلاح‌شده:
-  ۱) نمایش کامل تاریخ‌ها (هیچ ردیفی حذف نمی‌شود)
-  ۲) فیلتر خط تولید کامل (شامل خط ۸ و بقیه خطوط، با نرمال‌سازی 8.0 → 8)
-  ۳) فیلتر چندتایی تاریخ + گزینه اختیاری «فقط جدیدترین تاریخ هر نقطه» (پیش‌فرض خاموش)
-  ۴) هدر: لوگوی خودت چپ | عنوان وسط | لوگوی سیمان تهران راست
-  ۵) مدیریت ۷ کاربر با ایمیل + ارسال واقعی ایمیل (SMTP) و mailto
+نسخه کامل و یکپارچه:
+  1) اتصال به شیت‌های ارتعاشات، Assets و اعلانیه‌ها (Announcements)
+  2) فیلترهای پیشرفته و روان با نرمال‌سازی کامل
+  3) نمایش جدول مشخصات بیرینگ و تجهیز
+  4) سیستم اعلانیه‌های هوشمند بر اساس تاریخ و وضعیت
+  5) مدیریت کاربران و سیستم ارسال ایمیل (SMTP و Mailto)
+  6) گزارش‌گیری HTML قابل چاپ و خروجی CSV
 """
 
 import os
@@ -43,6 +44,7 @@ def _secret(key, default=""):
 SHEET_ID = _secret("SHEET_ID", "").strip()
 SHEET_VIB = _secret("SHEET_VIB", "ارتعاشات")
 SHEET_ASSETS = _secret("SHEET_ASSETS", "Assets")
+SHEET_ANN = _secret("SHEET_ANN", "اعلانیه ها")
 
 # ---------- حدود هشدار ----------
 WARN_LIMIT = 4.5   # mm/s
@@ -50,11 +52,8 @@ CRIT_LIMIT = 7.0   # mm/s
 
 EMPTY_TOKENS = {"", "-", "—", "_", "na", "n/a", "null", "none", "nan", "بی‌داده"}
 
-# شرح نقاط — آزادانه ویرایش کن. هر نقطه‌ای که اینجا نباشد، «نقطه N» نمایش داده می‌شود.
-POINT_LABELS = {
-    # "P1": "بیرینگ موتور — سمت کوپلینگ",
-    # "P2": "بیرینگ موتور — سمت آزاد",
-}
+# شرح نقاط
+POINT_LABELS = {}
 
 # ---------- ستون‌ها ----------
 VIEW_COLS = ["تاریخ", "خط تولید", "واحد", "تجهیز", "نقطه", "شرح نقطه",
@@ -85,6 +84,16 @@ ASSET_COLUMNS = {
     "bearing": ["شماره بیرینگ", "بیرینگ", "bearing"],
     "bush":    ["بوش", "bush"],
     "rpm":     ["دور", "rpm", "سرعت"],
+}
+
+ANN_COLUMNS = {
+    "title":  ["عنوان", "title"],
+    "text":   ["متن", "text", "شرح"],
+    "type":   ["نوع", "type"],
+    "active": ["فعال", "active"],
+    "start":  ["تاریخ شروع", "start"],
+    "end":    ["تاریخ انقضا", "end"],
+    "tag":    ["برچسب", "tag"],
 }
 
 # ============================================================
@@ -118,7 +127,6 @@ def is_blank(value):
 
 
 def to_num(value):
-    """تبدیل محتوا به عدد؛ ناموفق → None."""
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
@@ -151,9 +159,6 @@ def to_text(value):
 
 
 def clean_label(value):
-    """برچسب تمیز: ارقام فارسی→انگلیسی، حذف .0 انتهایی، یکسان‌سازی فاصله.
-    مثال: 8.0 → '8'   |   'خط  ۸' → 'خط 8'   |   ۱۲ → '12'
-    """
     if is_blank(value):
         return ""
     s = fa2en(value).strip()
@@ -166,12 +171,10 @@ def clean_label(value):
 
 
 def natural_key(s):
-    """مرتب‌سازی طبیعی: خط ۲ قبل از خط ۱۰"""
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", str(s))]
 
 
 def point_of(value):
-    """p1 / P 1 / نقطه ۱ / ۱  →  P1"""
     s = fa2en(value).strip()
     if s.lower() in EMPTY_TOKENS:
         return ""
@@ -200,7 +203,6 @@ def point_order(code):
 
 
 def parse_date(value):
-    """تاریخ شمسی → (سال، ماه، روز)"""
     if is_blank(value):
         return None
     s = fa2en(value).strip().split(" ")[0]
@@ -260,7 +262,7 @@ def safe_name(s):
 
 
 # ============================================================
-# ۲) تطبیق ستون‌ها (ضد KeyError)
+# ۲) تطبیق ستون‌ها
 # ============================================================
 def resolve_columns(df, spec):
     used = set()
@@ -331,8 +333,6 @@ def _dedupe(cols):
 @st.cache_data(ttl=300, show_spinner="در حال خواندن شیت...")
 def load_sheet(sheet_name):
     errors = []
-
-    # ۱) سرویس اکانت
     try:
         import gspread
         from google.oauth2.service_account import Credentials
@@ -353,18 +353,17 @@ def load_sheet(sheet_name):
             ws = sh.worksheet(sheet_name)
             values = ws.get_all_values()
             if len(values) < 2:
-                raise ValueError("شیت خالی است یا فقط سرستون دارد")
+                raise ValueError("شیت خالی است")
             header = _dedupe(values[0])
             rows = []
             for r in values[1:]:
                 r = list(r) + [""] * (len(header) - len(r))
                 rows.append(r[: len(header)])
             return pd.DataFrame(rows, columns=header), ""
-        raise ValueError("شناسه شیت یا اطلاعات سرویس اکانت تنظیم نشده")
+        raise ValueError("شناسه شیت تنظیم نشده")
     except Exception as exc:
         errors.append("gspread: %s" % exc)
 
-    # ۲) خروجی CSV عمومی
     try:
         url = (
             "https://docs.google.com/spreadsheets/d/%s/gviz/tq?tqx=out:csv&sheet=%s"
@@ -383,10 +382,9 @@ def load_sheet(sheet_name):
 
 
 # ============================================================
-# ۴) ساخت داده تمیز
+# ۴) ساخت داده‌ها
 # ============================================================
 def build_assets(df):
-    """دیکشنری (نام تجهیز یکسان‌شده، کد نقطه) → اطلاعات بیرینگ"""
     if df is None or df.empty:
         return {}
     m = resolve_columns(df, ASSET_COLUMNS)
@@ -422,16 +420,10 @@ def lookup_asset(assets, equip, code):
 
 
 def build_vib(df, assets):
-    """ساخت جدول تمیز ارتعاشات.
-
-    ⚠️ رفع باگ: در این نسخه هیچ ردیفی dedupe یا حذف نمی‌شود؛
-    تمام تاریخ‌های هر نقطه نگه داشته می‌شوند تا تاریخچه کامل دیده شود.
-    """
     if df is None or df.empty:
         return pd.DataFrame()
 
     m = resolve_columns(df, VIB_COLUMNS)
-
     dates = [parse_date(v) for v in col_or_blank(df, m, "date")]
     line_s = [clean_label(v) for v in col_or_blank(df, m, "line")]
     unit_s = [clean_label(v) for v in col_or_blank(df, m, "unit")]
@@ -471,16 +463,14 @@ def build_vib(df, assets):
     if out.empty:
         return out
 
-    # حذف فقط ردیف‌های کاملاً خالی (بدون تجهیز، بدون نقطه و بدون هیچ عددی)
     keep = ~(
         (out["تجهیز"].astype(str).str.strip() == "")
         & (out["نقطه"].astype(str).str.strip() == "")
         & out[["افقی", "عمودی", "محوری"]].isna().all(axis=1)
     )
     out = out[keep].copy()
-
     out["_pord"] = out["نقطه"].map(point_order)
-    out = out.sort_values(["_ord", "_pord"], kind="mergesort").reset_index(drop=True)
+    out = out.sort_values(["_ord", "_pord"], ascending=[False, True], kind="mergesort").reset_index(drop=True)
     out = ensure_cols(out, VIEW_COLS)
     return out
 
@@ -510,7 +500,7 @@ def style_table(df):
 
 
 # ============================================================
-# ۵) گزارش HTML قابل چاپ
+# ۵) گزارش HTML
 # ============================================================
 REPORT_TEMPLATE = """<!DOCTYPE html>
 <html lang="fa" dir="rtl"><head><meta charset="utf-8">
@@ -582,7 +572,6 @@ DEFAULT_USERS = {
 def init_users():
     if "users" not in st.session_state:
         users = {k: dict(v) for k, v in DEFAULT_USERS.items()}
-        # جایگزینی ایمیل‌های واقعی از Secrets:  [users]  manager = "x@y.ir"
         try:
             for k, v in dict(st.secrets.get("users", {})).items():
                 if k in users:
@@ -618,7 +607,7 @@ def send_email_smtp(to_list, subject, body):
 init_users()
 
 # ============================================================
-# ۷) سربرگ: لوگو چپ | عنوان وسط | لوگو راست
+# ۷) سربرگ
 # ============================================================
 h_left, h_mid, h_right = st.columns([1, 4, 1], gap="small")
 
@@ -656,39 +645,25 @@ st.divider()
 # ============================================================
 if not SHEET_ID:
     st.error("شناسه شیت (SHEET_ID) تنظیم نشده است.")
-    st.info(
-        "در بخش Secrets برنامه، مقدار SHEET_ID را برابر شناسه فایل گوگل‌شیت قرار بده.\n\n"
-        "شناسه، بخشی از آدرس بین /d/ تا /edit است."
-    )
     st.stop()
 
 vib_raw, vib_err = load_sheet(SHEET_VIB)
 asr_raw, asr_err = load_sheet(SHEET_ASSETS)
+ann_raw, ann_err = load_sheet(SHEET_ANN)
 
 if vib_raw.empty:
-    st.error("داده‌ای برای نمایش پیدا نشد.")
-    st.markdown("**پیام خواندن شیت ارتعاشات:**")
+    st.error("داده‌ای برای ارتعاشات پیدا نشد.")
     st.code(vib_err or "بدون پیام", language="text")
-    st.info(
-        "۱) SHEET_ID را تنظیم کن.\n"
-        "۲) نام تب‌ها باید «ارتعاشات» و «Assets» باشد.\n"
-        "۳) دسترسی شیت را روی «هر کسی با لینک» بگذار."
-    )
     st.stop()
-
-if asr_raw.empty:
-    st.warning("شیت Assets خوانده نشد؛ شماره بیرینگ فقط از شیت ارتعاشات برداشته می‌شود.")
 
 assets = build_assets(asr_raw)
 vib = build_vib(vib_raw, assets)
 
 if vib.empty:
-    st.error("پس از پردازش، ردیف معتبری باقی نماند. سرستون‌های شیت را بررسی کن.")
-    st.write(list(vib_raw.columns))
-    st.dataframe(vib_raw.head(10))
+    st.error("پس از پردازش، ردیف معتبری باقی نماند.")
     st.stop()
 
-df = vib.copy()   # ← رفع باگ NameError: df همیشه ساخته می‌شود
+df = vib.copy()
 
 # ============================================================
 # ۹) فیلترها
@@ -705,7 +680,6 @@ def options_from(series):
     return sorted(vals, key=natural_key)
 
 
-# --- خط تولید: گزینه‌ها از کل داده خام ساخته می‌شود (رفع باگ نبودن خط ۸) ---
 _raw_map = resolve_columns(vib_raw, VIB_COLUMNS)
 raw_line = col_or_blank(vib_raw, _raw_map, "line")
 line_opts = options_from(list(raw_line) + list(df["خط تولید"]))
@@ -716,7 +690,6 @@ if line_opts:
 else:
     sel_line = []
 
-# --- واحد ---
 unit_opts = options_from(df["واحد"])
 if unit_opts:
     sel_unit = st.sidebar.multiselect("واحد", unit_opts, placeholder="همه واحدها")
@@ -725,7 +698,6 @@ if unit_opts:
 else:
     sel_unit = []
 
-# --- تجهیز ---
 eq_opts = options_from(df["تجهیز"])
 if eq_opts:
     sel_eq = st.sidebar.multiselect("تجهیز", eq_opts, placeholder="همه تجهیزات")
@@ -734,7 +706,6 @@ if eq_opts:
 else:
     sel_eq = []
 
-# --- تاریخ: چندتایی (رفع باگ نمایش فقط آخرین تاریخ) ---
 st.sidebar.markdown("**تاریخ‌ها**")
 all_dates = sorted({d for d in df["تاریخ"] if d}, reverse=True)
 sel_dates = st.sidebar.multiselect(
@@ -752,11 +723,11 @@ only_latest = st.sidebar.checkbox(
 )
 if only_latest:
     df = (
-        df.sort_values("_ord", kind="mergesort")
-          .drop_duplicates(subset=["تجهیز", "نقطه"], keep="last")
+        df.sort_values(["_ord", "_pord"], ascending=[False, True], kind="mergesort")
+          .drop_duplicates(subset=["تجهیز", "نقطه"], keep="first")
     )
 
-df = df.sort_values(["_ord", "_pord"], kind="mergesort").reset_index(drop=True)
+df = df.sort_values(["_ord", "_pord"], ascending=[False, True], kind="mergesort").reset_index(drop=True)
 show = df.copy()
 
 if len(sel_eq) == 1:
@@ -772,9 +743,8 @@ if not _dates_in_show:
 elif len(_dates_in_show) == 1:
     caption_dates = _dates_in_show[0]
 else:
-    caption_dates = "%s تا %s (%d تاریخ)" % (_dates_in_show[0], _dates_in_show[-1], len(_dates_in_show))
+    caption_dates = "%s تا %s (%d تاریخ)" % (_dates_in_show[-1], _dates_in_show[0], len(_dates_in_show))
 
-# ---------- اعلانیه‌ها ----------
 critical = show[show["وضعیت"].astype(str).str.contains("بحرانی")] if len(show) else show
 warning = show[show["وضعیت"].astype(str).str.contains("هشدار")] if len(show) else show
 n_alerts = len(critical) + len(warning)
@@ -785,19 +755,32 @@ s2.metric("تعداد تاریخ‌ها", f"{len(_dates_in_show)}")
 s3.metric("🔴 بحرانی", f"{len(critical)}")
 s4.metric("🟡 هشدار", f"{len(warning)}")
 
-with st.expander(f"🔔 اعلانیه‌ها — {n_alerts} مورد", expanded=False):
-    if n_alerts == 0:
-        st.success("✅ هیچ اعلانیه‌ای وجود ندارد.")
+# ---------- اعلانیه‌ها از شیت Announcements ----------
+with st.expander(f"🔔 اعلانیه‌ها و اطلاعیه‌ها", expanded=False):
+    if not ann_raw.empty:
+        m_ann = resolve_columns(ann_raw, ANN_COLUMNS)
+        titles = col_or_blank(ann_raw, m_ann, "title")
+        texts = col_or_blank(ann_raw, m_ann, "text")
+        types = col_or_blank(ann_raw, m_ann, "type")
+        actives = col_or_blank(ann_raw, m_ann, "active")
+        
+        has_ann = False
+        for i in range(len(ann_raw)):
+            act = str(actives[i]).strip().lower()
+            if act in ["بله", "yes", "true", "1"]:
+                has_ann = True
+                t_title = str(titles[i])
+                t_text = str(texts[i])
+                t_type = str(types[i]).strip()
+                
+                if "خطر" in t_type or "بحرانی" in t_type:
+                    st.error(f"**{t_title}**\n\n{t_text}")
+                else:
+                    st.warning(f"**{t_title}**\n\n{t_text}")
+        if not has_ann:
+            st.info("هیچ اطلاعیه فعالی ثبت نشده است.")
     else:
-        alert_cols = [c for c in ["تاریخ", "خط تولید", "واحد", "تجهیز", "نقطه",
-                                  "شرح نقطه", "شماره بیرینگ", "حداکثر", "وضعیت"]
-                      if c in show.columns]
-        if len(critical):
-            st.markdown("### 🔴 بحرانی — %d مورد" % len(critical))
-            st.dataframe(critical[alert_cols], use_container_width=True, hide_index=True)
-        if len(warning):
-            st.markdown("### 🟡 هشدار — %d مورد" % len(warning))
-            st.dataframe(warning[alert_cols], use_container_width=True, hide_index=True)
+        st.info("شیت اعلانیه‌ها خالی یا یافت نشد.")
 
 # ============================================================
 # ۱۰) تب‌ها
@@ -806,7 +789,6 @@ tab_table, tab_chart, tab_alert, tab_users = st.tabs(
     ["📋 جدول داده‌ها", "📈 نمودارها", "📧 ارسال اعلان", "👥 کاربران"]
 )
 
-# ---------------- جدول ----------------
 with tab_table:
     st.subheader("داده‌های ارتعاش — %s" % equip)
     st.caption("بازه: %s" % caption_dates)
@@ -841,7 +823,6 @@ with tab_table:
                            file_name="report_%s.html" % safe_name(equip),
                            mime="text/html", use_container_width=True)
 
-# ---------------- نمودار ----------------
 with tab_chart:
     st.subheader("روند ارتعاش")
     if show.empty:
@@ -851,29 +832,20 @@ with tab_chart:
         g["_label_date"] = g["تاریخ"]
 
         st.markdown("**بیشترین مقدار هر جهت در هر تاریخ**")
-        trend = g.groupby("_label_date")[["افقی", "عمودی", "محوری"]].max().sort_index()
+        trend = g.groupby("_label_date")[["افقی", "عمودی", "محوری"]].max().sort_index(ascending=False)
         st.line_chart(trend)
 
-        st.markdown("**میانگین/بیشترین ارتعاش هر نقطه**")
+        st.markdown("**بیشترین ارتعاش هر نقطه**")
         by_point = g.groupby("نقطه")["حداکثر"].max().dropna().sort_values(ascending=False)
         if not by_point.empty:
             by_point.index = [str(c) + " - " + point_label(c) for c in by_point.index]
             st.bar_chart(by_point)
 
-        st.markdown("**سهم وضعیت‌ها**")
-        stt = g["وضعیت"].astype(str)
-        for ic in ("🔴 ", "🟡 ", "🟢 ", "⚪ "):
-            stt = stt.str.replace(ic, "", regex=False)
-        st.bar_chart(stt.value_counts())
-
         if g["دما"].notna().any():
             st.markdown("**روند دما**")
-            temp = g.groupby("_label_date")["دما"].max().sort_index()
+            temp = g.groupby("_label_date")["دما"].max().sort_index(ascending=False)
             st.line_chart(temp)
-        else:
-            st.caption("ستون دما خالی است، بنابراین نمودار دما نمایش داده نمی‌شود.")
 
-# ---------------- اعلان ----------------
 with tab_alert:
     st.subheader("پیش‌نویس اعلان")
     crit_rows = show[show["وضعیت"].astype(str).str.contains("بحرانی|هشدار")] if len(show) else show
@@ -915,7 +887,6 @@ with tab_alert:
         to_list = list(dict.fromkeys(to_list))
 
         subject = "هشدار ارتعاش — %s — %s" % (equip, caption_dates)
-        st.caption("گیرندگان: %s" % (", ".join(to_list) if to_list else "تعیین نشده"))
 
         b1, b2 = st.columns(2)
         with b1:
@@ -932,21 +903,6 @@ with tab_alert:
             )
             st.markdown("[📨 باز کردن برنامه ایمیل](%s)" % mailto)
 
-        if st.button("ثبت در تاریخچه"):
-            st.session_state["alert_history"].append({
-                "زمان": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "تجهیز": equip,
-                "تعداد ردیف": len(crit_rows),
-                "گیرندگان": len(to_list),
-            })
-            st.success("در تاریخچه ثبت شد.")
-
-        if st.session_state["alert_history"]:
-            st.markdown("**تاریخچه اعلان‌ها**")
-            st.dataframe(pd.DataFrame(st.session_state["alert_history"]),
-                         use_container_width=True, hide_index=True)
-
-# ---------------- کاربران ----------------
 with tab_users:
     st.subheader("مدیریت کاربران")
     users = st.session_state["users"]
@@ -963,57 +919,12 @@ with tab_users:
                 st.rerun()
             else:
                 st.error("نام کاربری یا رمز نادرست است.")
-        st.caption("کاربر پیش‌فرض: admin — رمز پیش‌فرض: admin (بعد از ورود عوض کن)")
     else:
         st.success("دسترسی مالک سیستم فعال است.")
-        rows = [{
+        urows = [{
             "کاربر": k,
             "نام": v.get("name", ""),
             "ایمیل": v.get("email", ""),
             "نقش": v.get("role", ""),
-            "رمز": v.get("pass", ""),
         } for k, v in users.items()]
-        base = pd.DataFrame(rows)
-        edited_users = st.data_editor(base, use_container_width=True, hide_index=True,
-                                      num_rows="dynamic",
-                                      key="users_editor")
-        if st.button("💾 ذخیره تغییرات کاربران"):
-            new_users = {}
-            for _, r in edited_users.iterrows():
-                k = str(r.get("کاربر", "")).strip()
-                if not k:
-                    continue
-                new_users[k] = {
-                    "name": str(r.get("نام", "") or ""),
-                    "email": str(r.get("ایمیل", "") or ""),
-                    "role": str(r.get("نقش", "") or ""),
-                    "pass": str(r.get("رمز", "") or "1234"),
-                }
-            if new_users:
-                st.session_state["users"] = new_users
-                st.success("تغییرات ذخیره شد.")
-                st.rerun()
-            else:
-                st.error("حداقل یک کاربر لازم است.")
-
-        st.divider()
-        st.markdown("**تغییر رمز مالک**")
-        old = st.text_input("رمز فعلی", type="password", key="old_pw")
-        new = st.text_input("رمز جدید", type="password", key="new_pw")
-        if st.button("تغییر رمز"):
-            if old == st.session_state["users"].get("admin", {}).get("pass") and new:
-                st.session_state["users"]["admin"]["pass"] = new
-                st.success("رمز تغییر کرد.")
-            else:
-                st.error("رمز فعلی نادرست است یا رمز جدید خالی است.")
-
-        if st.button("خروج از حالت مالک"):
-            st.session_state["is_owner"] = False
-            st.rerun()
-
-st.divider()
-st.caption(
-    "حد هشدار %s و حد بحرانی %s میلی‌متر بر ثانیه. "
-    "شرح نقاط از دیکشنری POINT_LABELS در ابتدای فایل قابل ویرایش است."
-    % (WARN_LIMIT, CRIT_LIMIT)
-)
+        st.dataframe(pd.DataFrame(urows), use_container_width=True, hide_index=True)
