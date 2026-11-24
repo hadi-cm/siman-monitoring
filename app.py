@@ -127,7 +127,7 @@ def to_num(value):
         except Exception:
             pass
         return float(value)
-    s = fa2en(value).strip().replace(\"，\", \"\").replace(\",\", \"\").replace(\" \", \"\")
+    s = fa2en(value).strip().replace(\",\", \"\").replace(\",\", \"\").replace(\" \", \"\")
     s = s.replace(\"٫\", \".\")
     if s.lower() in EMPTY_TOKENS:
         return None
@@ -152,11 +152,11 @@ def clean_label(value):
     s = re.sub(r\"\\s+\\", \" \", s)
     if re.fullmatch(r\"-?\\d+\\.0+\", s):
         s = s.split(\".\")[0]
-    if re.fullmatch(r\"\\d+\", s):
+    if re.fullmatch(r\"\\d+\\", s):
         s = str(int(s))
     return s
 def natural_key(s):
-    return [int(t) if t.isdigit() else t.lower() for t in re.split(r\"(\\d+)\", str(s))]
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r\"(\\d+)\\", str(s))]
 def point_of(value):
     s = fa2en(value).strip()
     if s.lower() in EMPTY_TOKENS:
@@ -177,13 +177,13 @@ def point_label(code):
     num = code[1:] if code.startswith(\"P\") else code
     return \"نقطه \" + fa2en(num)
 def point_order(code):
-    m = re.search(r\"(\\d+)\", str(code))
+    m = re.search(r\"(\\d+)\\", str(code))
     return int(m.group(1)) if m else 999
 def parse_date(value):
     if is_blank(value):
         return None
     s = fa2en(value).strip().split(\" \")[0]
-    s = s.replace(\"٫\", \"/\").replace(\"-\", \"/\").replace(\".\", \"/\")
+    s = s.replace(\"٫\", \"/\").replace(\"-\\", \"/\").replace(\".\", \"/\")
     m = re.search(r\"(\\d{4})\\s*/\\s*(\\d{1,2})\\s*/\\s*(\\d{1,2})\", s)
     if m:
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
@@ -223,7 +223,8 @@ def status_of(h, v, a):
     return \"نرمال\"
 STATUS_ICON = {\"بحرانی\": \"🔴\", \"هشدار\": \"🟡\", \"نرمال\": \"🟢\", \"بی‌داده\": \"⚪\"}
 def safe_name(s):
-    return re.sub(r\"[^0-9A-Za-zآ-ی_\\-]+\", \"_\", str(s)).strip(\"_\") or \"report\"
+    return re.sub(r\"[^0-9A-Za-zآ-ی_\\-]+\\", \"_\", str(s)).strip(\"_\") or \"report\"
+
 # ---------- منطق قرارداد نقاط ----------
 def _match_mapping_key(value):
     nv = norm(value)
@@ -591,7 +592,7 @@ def build_report_html(show, equip_title, caption_dates):
     out = out.replace(\"__ROWS__\", \"\".join(rows_out))
     return out
 # ============================================================
-# ۶) کاربران و ایمیل (اصلاح شده: ورود با ایمیل)
+# ۶) کاربران و ایمیل (ورود با ایمیل)
 # ============================================================
 DEFAULT_USERS = {
     \"cm.zandiyeh@gmail.com\": {\"name\": \"هادی زندیه\", \"role\": \"پیمانکار / مالک سیستم\", \"pass\": \"1234\"},
@@ -849,7 +850,7 @@ with tab_chart:
             st.markdown(\"**روند دما**\")
             temp = g.groupby(\"_label_date\")[\"دما\"].max().sort_index(ascending=False)
             st.line_chart(temp)
-        # --- نمودار دایره‌ای توزیع وضعیت در آخر ---
+        # --- نمودار توزیع وضعیت در آخر ---
         st.divider()
         st.subheader(\"📊 توزیع کلی وضعیت تجهیزات\")
         stat_counts = show[\"وضعیت\"].value_counts()
@@ -889,7 +890,7 @@ with tab_alert:
                                 default=[k for k in email_map if \"manager\" in k.lower()][:1])
         extra = st.text_input(\"گیرندگان دلخواه (با کاما جدا کن)\", value=\"\")
         to_list = [email_map[k] for k in picked if email_map.get(k)]
-        for part in re.split(r\"[,;\\s]+\", extra):
+        for part in re.split(r\"[,;\\s]+\\", extra):
             if \"@\" in part:
                 to_list.append(part.strip())
         to_list = list(dict.fromkeys(to_list))
