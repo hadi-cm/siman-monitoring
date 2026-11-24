@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 سامانه هوشمند پایش وضعیت ارتعاشات — سیمان تهران
-نسخه کامل و یکپارچه:
+نسخه یکپارچه (کد دیشب + موارد امشب):
   1) اتصال به شیت‌های ارتعاشات، Assets و اعلانیه‌ها (Announcements)
   2) فیلترهای پیشرفته و روان با نرمال‌سازی کامل
-  3) نمایش جدول مشخصات بیرینگ و تجهیز
-  4) سیستم اعلانیه‌های هوشمند بر اساس تاریخ و وضعیت
-  5) مدیریت کاربران و سیستم ارسال ایمیل (SMTP و Mailto)
-  6) گزارش‌گیری HTML قابل چاپ و خروجی CSV
+  3) قرارداد نقاط پایش (Points Mapping) بر اساس «نوع تجهیز» + «درایور»
+  4) کارت مشخصات تجهیز و راهنمای نقاط
+  5) نمایش جدول مشخصات بیرینگ و تجهیز
+  6) سیستم اعلانیه‌های هوشمند بر اساس تاریخ و وضعیت
+  7) مدیریت کاربران و سیستم ارسال ایمیل (SMTP و Mailto)
+  8) گزارش‌گیری HTML قابل چاپ و خروجی CSV
 """
 
 import os
@@ -32,14 +34,12 @@ st.set_page_config(
     layout="wide",
 )
 
-
 def _secret(key, default=""):
     try:
         v = st.secrets[key]
         return str(v) if v is not None else default
     except Exception:
         return default
-
 
 SHEET_ID = _secret("SHEET_ID", "").strip()
 SHEET_VIB = _secret("SHEET_VIB", "ارتعاشات")
@@ -52,7 +52,96 @@ CRIT_LIMIT = 7.0   # mm/s
 
 EMPTY_TOKENS = {"", "-", "—", "_", "na", "n/a", "null", "none", "nan", "بی‌داده"}
 
-# شرح نقاط
+# ============================================================
+# ۰-ب) قرارداد نقاط پایش (Points Mapping Contract)
+#     کلیدها = دقیقاً همان عناوینی که در شیت Assets می‌نویسی
+# ============================================================
+FAN_COUPLING = {
+    "P1": "انتهای موتور (NDE)",
+    "P2": "سر موتور (DE)",
+    "P3": "یاتاقان سمت کوپلینگ",
+    "P4": "یاتاقان سمت آزاد",
+}
+FAN_PULLEY = {
+    "P1": "انتهای موتور (NDE)",
+    "P2": "سر موتور (DE - سمت پولی)",
+    "P3": "یاتاقان فیکس فن (سمت پولی)",
+    "P4": "یاتاقان آزاد فن (سمت پروانه)",
+}
+GEARBOX_4 = {
+    "P1": "انتهای موتور",
+    "P2": "سر موتور",
+    "P3": "محور ورودی گیربکس (Input Shaft)",
+    "P4": "محور خروجی گیربکس (Output Shaft)",
+}
+MOTOR_2 = {
+    "P1": "انتهای موتور (NDE)",
+    "P2": "سر موتور (DE)",
+}
+CRUSHER_6 = {
+    "P1": "انتهای موتور",
+    "P2": "سر موتور",
+    "P3": "یاتاقان سمت فیکس پولی کوچک",
+    "P4": "یاتاقان سمت آزاد پولی کوچک",
+    "P5": "یاتاقان سمت فیکس روتور",
+    "P6": "یاتاقان سمت آزاد روتور",
+}
+BLOWER_4 = {
+    "P1": "انتهای موتور (NDE)",
+    "P2": "سر موتور (DE)",
+    "P3": "محور ورودی بلوئر",
+    "P4": "انتهای بلوئر",
+}
+BLOWER_SPECIAL_6 = {
+    "P1": "انتهای موتور (NDE)",
+    "P2": "سر موتور (DE)",
+    "P3": "محور ورودی گیربکس",
+    "P4": "محور خروجی گیربکس",
+    "P5": "محور ورودی",
+    "P6": "انتهای بلوئر",
+}
+COMPRESSOR_4 = {
+    "P1": "انتهای موتور (NDE)",
+    "P2": "سر موتور (DE - سمت پولی)",
+    "P3": "محور ورودی ایرند",
+    "P4": "انتهای ایرند",
+}
+PUMP_4 = {
+    "P1": "انتهای موتور (NDE)",
+    "P2": "سر موتور (DE)",
+    "P3": "محور ورودی پمپ",
+    "P4": "انتهای پمپ",
+}
+GEARBOX_MILL_11 = {
+    "P1": "انتهای موتور (NDE)",
+    "P2": "سر موتور (DE)",
+    "P3": "یاتاقان فیکس محور پینیون",
+    "P4": "یاتاقان سمت آزاد پینیون",
+    "P5": "یاتاقان سمت فیکس محور دوم",
+    "P6": "یاتاقان سمت آزاد محور دوم",
+    "P7": "یاتاقان سمت فیکس محور سوم",
+    "P8": "یاتاقان سمت آزاد محور سوم",
+    "P9": "یاتاقان بابیتی اول سمت گیربکس",
+    "P10": "یاتاقان بابیتی وسط",
+    "P11": "یاتاقان بابیتی نزدیک پینیون آسیاب",
+}
+
+EQUIPMENT_MAPPING = {
+    "فن": {"کوپلینگی": FAN_COUPLING, "پولی": FAN_PULLEY, "default": FAN_COUPLING},
+    "گیربکس": {"default": GEARBOX_4},
+    "گیربکس آسیاب": {"default": GEARBOX_MILL_11},
+    "گیربکس سمت کوه": {"default": GEARBOX_MILL_11},
+    "گیربکس سمت شهر": {"default": GEARBOX_MILL_11},
+    "موتور": {"default": MOTOR_2},
+    "کراشر": {"default": CRUSHER_6},
+    "بلوئر": {"default": BLOWER_4},
+    "بلوور": {"default": BLOWER_4},
+    "بلوئر خاص": {"default": BLOWER_SPECIAL_6},
+    "بلوور خاص": {"default": BLOWER_SPECIAL_6},
+    "کمپرسور": {"default": COMPRESSOR_4},
+    "پمپ": {"default": PUMP_4},
+}
+
 POINT_LABELS = {}
 
 # ---------- ستون‌ها ----------
@@ -79,11 +168,15 @@ VIB_COLUMNS = {
 }
 
 ASSET_COLUMNS = {
-    "equip":   ["عنوان تجهیز", "تجهیز", "equipment", "equip"],
-    "point":   ["نقطه", "شماره نقطه", "point"],
+    "equip":   ["نام تجهیز", "عنوان تجهیز", "تجهیز", "equipment", "equip"],
+    "line":    ["خط تولید", "خط"],
+    "unit":    ["واحد"],
+    "type":    ["نوع تجهیز", "نوع"],
+    "point":   ["راهنمایی نقاط", "نقطه", "شماره نقطه", "point"],
     "bearing": ["شماره بیرینگ", "بیرینگ", "bearing"],
-    "bush":    ["بوش", "bush"],
-    "rpm":     ["دور", "rpm", "سرعت"],
+    "bush":    ["بوش", "بوشت", "bush"],
+    "rpm":     ["دور نامی", "دور", "rpm", "سرعت"],
+    "driver":  ["درایور", "درایو", "سیستم درایور", "driver"],
 }
 
 ANN_COLUMNS = {
@@ -101,19 +194,16 @@ ANN_COLUMNS = {
 # ============================================================
 _FA_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 
-
 def fa2en(value):
     if value is None:
         return ""
     return str(value).translate(_FA_DIGITS)
-
 
 def norm(value):
     s = fa2en(value).lower()
     s = s.replace("ي", "ی").replace("ك", "ک").replace("ۀ", "ه").replace("ة", "ه")
     s = re.sub(r"[\s\u200c\.\-_:/\\|()\[\]{}!؟?،,؛;:'\"«»ـ]+", "", s)
     return s
-
 
 def is_blank(value):
     if value is None:
@@ -124,7 +214,6 @@ def is_blank(value):
     except Exception:
         pass
     return str(value).strip().lower() in EMPTY_TOKENS
-
 
 def to_num(value):
     if value is None or isinstance(value, bool):
@@ -151,12 +240,10 @@ def to_num(value):
                 return None
     return None
 
-
 def to_text(value):
     if is_blank(value):
         return ""
     return str(value).strip()
-
 
 def clean_label(value):
     if is_blank(value):
@@ -169,10 +256,8 @@ def clean_label(value):
         s = str(int(s))
     return s
 
-
 def natural_key(s):
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", str(s))]
-
 
 def point_of(value):
     s = fa2en(value).strip()
@@ -186,7 +271,6 @@ def point_of(value):
         return "P%d" % int(m.group(1))
     return ""
 
-
 def point_label(code):
     if not code:
         return ""
@@ -196,11 +280,9 @@ def point_label(code):
     num = code[1:] if code.startswith("P") else code
     return "نقطه " + fa2en(num)
 
-
 def point_order(code):
     m = re.search(r"(\d+)", str(code))
     return int(m.group(1)) if m else 999
-
 
 def parse_date(value):
     if is_blank(value):
@@ -225,23 +307,19 @@ def parse_date(value):
         return None
     return (y, mo, d)
 
-
 def fmt_date(tpl):
     if not tpl:
         return ""
     return "%04d/%02d/%02d" % (tpl[0], tpl[1], tpl[2])
-
 
 def date_key(tpl):
     if not tpl:
         return 0
     return tpl[0] * 10000 + tpl[1] * 100 + tpl[2]
 
-
 def row_max(h, v, a):
     vals = [x for x in (h, v, a) if x is not None]
     return max(vals) if vals else None
-
 
 def status_of(h, v, a):
     mx = row_max(h, v, a)
@@ -253,13 +331,48 @@ def status_of(h, v, a):
         return "هشدار"
     return "نرمال"
 
-
 STATUS_ICON = {"بحرانی": "🔴", "هشدار": "🟡", "نرمال": "🟢", "بی‌داده": "⚪"}
-
 
 def safe_name(s):
     return re.sub(r"[^0-9A-Za-zآ-ی_\-]+", "_", str(s)).strip("_") or "report"
 
+# ---------- منطق قرارداد نقاط ----------
+def _match_mapping_key(value):
+    """با حفظ عنوان اصلی، کلید متناظر در قرارداد را پیدا می‌کند."""
+    nv = norm(value)
+    if not nv:
+        return None
+    for k in EQUIPMENT_MAPPING:
+        if norm(k) == nv:
+            return k
+    for k in EQUIPMENT_MAPPING:
+        nk = norm(k)
+        if nk and (nk in nv or nv in nk):
+            return k
+    return None
+
+def _driver_key(driver):
+    n = norm(driver)
+    if "کوپل" in n:
+        return "کوپلینگی"
+    if "پول" in n or "تسمه" in n:
+        return "پولی"
+    return "default"
+
+def get_mapping(asset_type, driver):
+    """خروجی: دیکشنری نقطه -> شرح، بر اساس نوع تجهیز و درایور."""
+    key = _match_mapping_key(asset_type)
+    if not key:
+        return {}
+    block = EQUIPMENT_MAPPING.get(key, {})
+    dkey = _driver_key(driver)
+    if dkey in block:
+        return block[dkey]
+    if "default" in block:
+        return block["default"]
+    for v in block.values():
+        return v
+    return {}
 
 # ============================================================
 # ۲) تطبیق ستون‌ها
@@ -298,12 +411,10 @@ def resolve_columns(df, spec):
             mapping[role] = found
     return mapping
 
-
 def col_or_blank(df, mapping, role):
     if role in mapping:
         return df[mapping[role]]
     return pd.Series([""] * len(df), index=df.index)
-
 
 def ensure_cols(df, cols):
     df = df.copy()
@@ -311,7 +422,6 @@ def ensure_cols(df, cols):
         if c not in df.columns:
             df[c] = ""
     return df
-
 
 def _dedupe(cols):
     seen = {}
@@ -325,7 +435,6 @@ def _dedupe(cols):
             seen[name] = 0
         out.append(name)
     return out
-
 
 # ============================================================
 # ۳) خواندن شیت
@@ -380,37 +489,74 @@ def load_sheet(sheet_name):
 
     return pd.DataFrame(), " | ".join(errors)
 
-
 # ============================================================
 # ۴) ساخت داده‌ها
 # ============================================================
 def build_assets(df):
+    """خروجی: (دیکشنری نقطه‌ها، دیکشنری مشخصات هر تجهیز)"""
     if df is None or df.empty:
-        return {}
+        return {}, {}
     m = resolve_columns(df, ASSET_COLUMNS)
     if "equip" not in m or "point" not in m:
-        return {}
+        return {}, {}
 
     equip_s = list(col_or_blank(df, m, "equip"))
     point_s = list(col_or_blank(df, m, "point"))
     bearing_s = list(col_or_blank(df, m, "bearing"))
     bush_s = list(col_or_blank(df, m, "bush"))
     rpm_s = list(col_or_blank(df, m, "rpm"))
+    type_s = list(col_or_blank(df, m, "type"))
+    driver_s = list(col_or_blank(df, m, "driver"))
+    line_s = list(col_or_blank(df, m, "line"))
+    unit_s = list(col_or_blank(df, m, "unit"))
 
-    out = {}
-    for equip, pt, brg, bush, rpm in zip(equip_s, point_s, bearing_s, bush_s, rpm_s):
-        code = point_of(pt)
+    pairs = {}
+    meta = {}
+    for equip, pt, brg, bush, rpm, typ, drv, line, unit in zip(
+        equip_s, point_s, bearing_s, bush_s, rpm_s, type_s, driver_s, line_s, unit_s
+    ):
         ekey = norm(equip)
-        if not ekey or not code:
+        if not ekey:
             continue
-        out[(ekey, code)] = {
+
+        rec = meta.setdefault(ekey, {
+            "equip": to_text(equip),
+            "type": "",
+            "driver": "",
+            "rpm": "",
+            "bush": "",
+            "line": "",
+            "unit": "",
+            "bearings": [],
+        })
+        if not rec["type"] and to_text(typ):
+            rec["type"] = to_text(typ)
+        if not rec["driver"] and to_text(drv):
+            rec["driver"] = to_text(drv)
+        if not rec["rpm"] and to_text(rpm):
+            rec["rpm"] = to_text(rpm)
+        if not rec["bush"] and to_text(bush):
+            rec["bush"] = to_text(bush)
+        if not rec["line"] and to_text(line):
+            rec["line"] = to_text(line)
+        if not rec["unit"] and to_text(unit):
+            rec["unit"] = to_text(unit)
+
+        code = point_of(pt)
+        if not code:
+            continue
+        if to_text(brg) and to_text(brg) not in rec["bearings"]:
+            rec["bearings"].append(to_text(brg))
+
+        pairs[(ekey, code)] = {
             "equip": to_text(equip),
             "bearing": to_text(brg),
             "bush": to_text(bush),
             "rpm": to_text(rpm),
+            "type": to_text(typ),
+            "driver": to_text(drv),
         }
-    return out
-
+    return pairs, meta
 
 def lookup_asset(assets, equip, code):
     ekey = norm(equip)
@@ -418,8 +564,7 @@ def lookup_asset(assets, equip, code):
         return None
     return assets.get((ekey, code))
 
-
-def build_vib(df, assets):
+def build_vib(df, assets, asset_meta):
     if df is None or df.empty:
         return pd.DataFrame()
 
@@ -439,9 +584,20 @@ def build_vib(df, assets):
     rows = []
     for i in range(len(df)):
         info = lookup_asset(assets, equip_s[i], pts[i]) or {}
+        meta = asset_meta.get(norm(equip_s[i]), {})
+
         bearing = info.get("bearing") or brg_sheet[i]
         h, v, a = h_s[i], v_s[i], a_s[i]
         stt = status_of(h, v, a)
+
+        # ---------- تکمیل اتوماتیک شرح نقطه از قرارداد ----------
+        desc = descs[i]
+        if not desc:
+            contract = get_mapping(meta.get("type", ""), meta.get("driver", ""))
+            desc = contract.get(pts[i], "")
+        if not desc:
+            desc = point_label(pts[i])
+
         rows.append({
             "تاریخ": fmt_date(dates[i]),
             "_ord": date_key(dates[i]),
@@ -449,7 +605,7 @@ def build_vib(df, assets):
             "واحد": unit_s[i],
             "تجهیز": equip_s[i],
             "نقطه": pts[i],
-            "شرح نقطه": descs[i] or point_label(pts[i]),
+            "شرح نقطه": desc,
             "شماره بیرینگ": bearing,
             "افقی": h,
             "عمودی": v,
@@ -474,7 +630,6 @@ def build_vib(df, assets):
     out = ensure_cols(out, VIEW_COLS)
     return out
 
-
 def style_table(df):
     def color_status(s):
         s = str(s)
@@ -497,7 +652,6 @@ def style_table(df):
         return sty
     except Exception:
         return df
-
 
 # ============================================================
 # ۵) گزارش HTML
@@ -522,7 +676,6 @@ REPORT_TEMPLATE = """<!DOCTYPE html>
 <table><thead><tr>__HEAD__</tr></thead><tbody>__ROWS__</tbody></table>
 <div class="legend">حد هشدار: __WARN__ mm/s &nbsp;|&nbsp; حد بحرانی: __CRIT__ mm/s</div>
 </body></html>"""
-
 
 def build_report_html(show, equip_title, caption_dates):
     head_cells = "".join("<th>%s</th>" % html.escape(c) for c in REPORT_COLS)
@@ -554,7 +707,6 @@ def build_report_html(show, equip_title, caption_dates):
     out = out.replace("__ROWS__", "".join(rows_out))
     return out
 
-
 # ============================================================
 # ۶) کاربران و ایمیل
 # ============================================================
@@ -567,7 +719,6 @@ DEFAULT_USERS = {
     "operator":    {"name": "اپراتور خط",     "email": "operator@example.com",    "role": "اپراتور",  "pass": "1234"},
     "viewer":      {"name": "ناظر",           "email": "viewer@example.com",      "role": "ناظر",     "pass": "1234"},
 }
-
 
 def init_users():
     if "users" not in st.session_state:
@@ -583,7 +734,6 @@ def init_users():
         st.session_state["users"] = users
     st.session_state.setdefault("is_owner", False)
     st.session_state.setdefault("alert_history", [])
-
 
 def send_email_smtp(to_list, subject, body):
     user = _secret("SMTP_USER", "")
@@ -602,7 +752,6 @@ def send_email_smtp(to_list, subject, body):
         return True, "ایمیل با موفقیت ارسال شد."
     except Exception as exc:
         return False, "خطا در ارسال ایمیل: %s" % exc
-
 
 init_users()
 
@@ -656,8 +805,8 @@ if vib_raw.empty:
     st.code(vib_err or "بدون پیام", language="text")
     st.stop()
 
-assets = build_assets(asr_raw)
-vib = build_vib(vib_raw, assets)
+assets, asset_meta = build_assets(asr_raw)
+vib = build_vib(vib_raw, assets, asset_meta)
 
 if vib.empty:
     st.error("پس از پردازش، ردیف معتبری باقی نماند.")
@@ -670,7 +819,6 @@ df = vib.copy()
 # ============================================================
 st.sidebar.subheader("🔍 فیلترها")
 
-
 def options_from(series):
     vals = []
     for v in series:
@@ -678,7 +826,6 @@ def options_from(series):
         if s and s not in vals:
             vals.append(s)
     return sorted(vals, key=natural_key)
-
 
 _raw_map = resolve_columns(vib_raw, VIB_COLUMNS)
 raw_line = col_or_blank(vib_raw, _raw_map, "line")
@@ -755,15 +902,50 @@ s2.metric("تعداد تاریخ‌ها", f"{len(_dates_in_show)}")
 s3.metric("🔴 بحرانی", f"{len(critical)}")
 s4.metric("🟡 هشدار", f"{len(warning)}")
 
+# ============================================================
+# ۹-ب) کارت مشخصات تجهیز و راهنمای نقاط (موارد امشب)
+# ============================================================
+if len(sel_eq) == 1:
+    eq_key = norm(sel_eq[0])
+    meta = asset_meta.get(eq_key, {})
+    mapping = get_mapping(meta.get("type", ""), meta.get("driver", ""))
+
+    with st.container(border=True):
+        st.markdown("### 🛠 مشخصات تجهیز: %s" % sel_eq[0])
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("نوع تجهیز", meta.get("type") or "—")
+        c2.metric("درایور", meta.get("driver") or "—")
+        c3.metric("دور نامی (RPM)", meta.get("rpm") or "—")
+        c4.metric("بوش", meta.get("bush") or "—")
+
+        if meta.get("bearings"):
+            st.caption("شماره بیرینگ‌های ثبت‌شده: " + " • ".join(meta["bearings"]))
+
+        st.markdown("#### 📍 راهنمای نقاط پایش")
+        if mapping:
+            guide_df = pd.DataFrame(
+                [{"نقطه": k, "شرح نقطه": v} for k, v in
+                 sorted(mapping.items(), key=lambda kv: point_order(kv[0]))]
+            )
+            st.dataframe(guide_df, use_container_width=True, hide_index=True)
+        else:
+            st.info(
+                "برای این تجهیز، «نوع تجهیز» یا «درایور» در شیت Assets پیدا/تطبیق داده نشد؛ "
+                "شرح نقاط از شیت ارتعاشات خوانده می‌شود."
+            )
+elif len(sel_eq) > 1:
+    st.caption("برای دیدن کارت مشخصات و راهنمای نقاط، فقط یک تجهیز را انتخاب کن.")
+
 # ---------- اعلانیه‌ها از شیت Announcements ----------
-with st.expander(f"🔔 اعلانیه‌ها و اطلاعیه‌ها", expanded=False):
+with st.expander("🔔 اعلانیه‌ها و اطلاعیه‌ها", expanded=False):
     if not ann_raw.empty:
         m_ann = resolve_columns(ann_raw, ANN_COLUMNS)
         titles = col_or_blank(ann_raw, m_ann, "title")
         texts = col_or_blank(ann_raw, m_ann, "text")
         types = col_or_blank(ann_raw, m_ann, "type")
         actives = col_or_blank(ann_raw, m_ann, "active")
-        
+
         has_ann = False
         for i in range(len(ann_raw)):
             act = str(actives[i]).strip().lower()
@@ -772,7 +954,7 @@ with st.expander(f"🔔 اعلانیه‌ها و اطلاعیه‌ها", expande
                 t_title = str(titles[i])
                 t_text = str(texts[i])
                 t_type = str(types[i]).strip()
-                
+
                 if "خطر" in t_type or "بحرانی" in t_type:
                     st.error(f"**{t_title}**\n\n{t_text}")
                 else:
