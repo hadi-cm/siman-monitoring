@@ -18,10 +18,9 @@ st.set_page_config(
     page_icon="📊",
     layout="wide",
 )
-def _secret(key, default=\"\"):
+def _secret(key, default=""):
     try:
-        v = st.secrets[key]
-        return str(v) if v is not None else default
+        return st.secrets[key] if key in st.secrets else default
     except Exception:
         return default
 SHEET_ID = '1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs'
