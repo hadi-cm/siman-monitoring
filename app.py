@@ -208,7 +208,7 @@ def fmt_date(tpl):
 def date_key(tpl):
     if not tpl:
         return 0
-    return tpl[0]  10000 + tpl[1]  100 + tpl[2]
+    return tpl[0]*10000 + tpl[1]*100 + tpl[2]
 def row_max(h, v, a):
     vals = [x for x in (h, v, a) if x is not None]
     return max(vals) if vals else None
