@@ -792,13 +792,13 @@ with st.expander('🔔 اعلانیه ها و اطلاعیه‌ها', expanded=F
             # اینجا را تغییر دادم تا اگر ستون فعال خالی بود هم نشان دهد
             if (act in ['بله', 'yes', 'true', '1', '✓', 'فعل'] or act == '') and txt.lower() != 'nan' and txt != '':
                 has_ann = True
-                t_title = str(titles[i]) if str(titles[i]).lower() != 'nan' else 'اطلاعیه'
+                t_title = str(titles[i]) if str(titles[i]).lower() != 'nan' else 'اعلانیه'
                 st.warning(f"{t_title}\n\n{txt}")
 
         if not has_ann:
-            st.info('هیچ اطلاعیه فعالی ثبت نشده است.')
+            st.info('هیچ اعلانیه فعالی ثبت نشده است.')
     else:
-        st.info('شیت اطلاعیه‌ها خالی یا یافت نشد.')
+        st.info('شیت اعلانیه خالی یا یافت نشد.')
 # ============================================================
 # 10) Tabs
 # ============================================================
