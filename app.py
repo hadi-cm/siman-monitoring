@@ -1,6 +1,4 @@
-
-
-<file_generation filename="app_final_with_credit.py" format="py" content_format="text" content="# -- coding: utf-8 -*-
+# -- coding: utf-8 -*-
 import os
 import io
 import re
