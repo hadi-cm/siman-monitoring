@@ -14,9 +14,9 @@ import streamlit as st
 # ۰) تنظیمات صفحه
 # ============================================================
 st.set_page_config(
-    page_title=\"سامانه هوشمند پایش وضعیت — سیمان تهران\",
-    page_icon=\"📊\",
-    layout=\"wide\",
+    page_title="سامانه هوشمند پایش وضعیت — سیمان تهران",
+    page_icon="📊",
+    layout="wide",
 )
 def _secret(key, default=\"\"):
     try:
