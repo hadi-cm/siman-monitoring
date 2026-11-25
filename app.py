@@ -26,7 +26,7 @@ def _secret(key, default=''):
         return default
 SHEET_ID = _secret('SHEET_ID', '').strip()
 SHEET_VIB = _secret('SHEET_VIB', 'ارتعاشات')
-SHEET_ASSETS = _secret('SHEET_ASSETS', 'Assets')
+SHEET_ANN = "https://docs.google.com/spreadsheets/d/1H4Yf3ilu72hI7YZns6EXNMpOfH-EII98_sEO_81uXrs/export?format=csv&gid=2057447521"
 SHEET_ANN = 'اعلانیه ها' 
 WARN_LIMIT = 4.5   # mm/s
 CRIT_LIMIT = 7.0   # mm/s
