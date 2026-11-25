@@ -777,28 +777,15 @@ if len(sel_eq) == 1:
 elif len(sel_eq) > 1:
     st.caption('برای دیدن کارت مشخصات و راهنمای نقاط، فقط یک تجهیز را انتخاب کن.')
 # -------------------- Announcements Logic --------------------
-with st.expander('🔔 اعلانیه ها و اطلاعیه‌ها', expanded=False):
+with st.expander('🔔 تست نمایش اطلاعیه‌ها', expanded=True):
     if not ann_raw.empty:
-        m_ann = resolve_columns(ann_raw, ANN_COLUMNS)
-        titles = col_or_blank(ann_raw, m_ann, 'title')
-        texts = col_or_blank(ann_raw, m_ann, 'text')
-        actives = col_or_blank(ann_raw, m_ann, 'active')
-
-        has_ann = False
-        for i in range(len(ann_raw)):
-            act = str(actives[i]).strip().lower()
-            txt = str(texts[i]).strip()
-
-            # اینجا را تغییر دادم تا اگر ستون فعال خالی بود هم نشان دهد
-            if (act in ['بله', 'yes', 'true', '1', '✓', 'فعل'] or act == '') and txt.lower() != 'nan' and txt != '':
-                has_ann = True
-                t_title = str(titles[i]) if str(titles[i]).lower() != 'nan' else 'اعلانیه'
-                st.warning(f"{t_title}\n\n{txt}")
-
-        if not has_ann:
-            st.info('هیچ اعلانیه فعالی ثبت نشده است.')
+        st.write("تعداد ردیف‌های یافت شده در شیت:", len(ann_raw))
+        st.write("نام ستون‌های یافت شده:", list(ann_raw.columns))
+        
+        # نمایش خام تمام داده‌های شیت برای تست
+        st.dataframe(ann_raw) 
     else:
-        st.info('شیت اعلانیه خالی یا یافت نشد.')
+        st.error("شیت کاملاً خالی است یا آدرس اشتباه است!")
 # ============================================================
 # 10) Tabs
 # ============================================================
