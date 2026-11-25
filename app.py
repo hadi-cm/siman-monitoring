@@ -777,7 +777,7 @@ if len(sel_eq) == 1:
 elif len(sel_eq) > 1:
     st.caption('برای دیدن کارت مشخصات و راهنمای نقاط، فقط یک تجهیز را انتخاب کن.')
 # -------------------- Announcements Logic --------------------
-with st.expander('🔔 اعلامیه‌ها و اطلاعیه‌ها', expanded=False):
+with st.expander('🔔 اعلانیه ها و اطلاعیه‌ها', expanded=False):
     if not ann_raw.empty:
         m_ann = resolve_columns(ann_raw, ANN_COLUMNS)
         titles = col_or_blank(ann_raw, m_ann, 'title')
