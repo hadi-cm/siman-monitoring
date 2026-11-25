@@ -293,9 +293,10 @@ def resolve_columns(df, spec):
             mapping[role] = found
     return mapping
 def col_or_blank(df, mapping, role):
-    if role in mapping:
-        return df[mapping[role]]
-`return pd.Series([''] * len(df), index=df.index)`
+        if role in mapping:
+            return df[mapping[role]]
+        else:
+            return pd.Series("", index=df.index)
 def ensure_cols(df, cols):
     df = df.copy()
     for c in cols:
